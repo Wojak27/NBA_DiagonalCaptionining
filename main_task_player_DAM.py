@@ -18,7 +18,7 @@ import time
 import argparse
 import json
 from dataloaders.dataloader_ourds_CLIP import OURDS_CLIP_DataLoader
-from main_task_caption_CLIP import Args_Caption
+from main_task_caption_DAM import Args_Caption
 from modules.tokenization import BertTokenizer
 from modules.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from modules.modeling import UniVL
