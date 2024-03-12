@@ -137,6 +137,12 @@ def get_args(description='UniVL on Caption Task'):
     parser.add_argument('--t1_postprocessing', action='store_true', help="Whether postprocess output with action type")
 
     parser.add_argument('--stage_two', action='store_true', help="Whether training with decoder.")
+    parser.add_argument("--visual_use_diagonal_masking", action='store_true', help="Use diagonal masking for visual features")
+    parser.add_argument("--player_embedding", default="CLIP", choices=["BERT", "CLIP", "none", "BERT-Stat"], help="Type of player embedding to use")
+    parser.add_argument("--player_embedding_order", default="lineup", choices=["lineup", "lineup-ordered", "posession", "none", "BC"], help="Order of player embedding")
+    parser.add_argument("--use_BBX_features", action='store_true', help="Use bounding box features")
+    parser.add_argument("--max_rand_players", type=int, default=5, help="Maximum number of random players")
+
     args = parser.parse_args()
 
 
@@ -945,76 +951,7 @@ def init_training_caption(args):
             model = load_model(-1, args, n_gpu, device, model_file=args.init_model)
             eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalObj=nlgEvalObj)
 
-class Args_Caption:
-    def __init__(self, data_dir="data", features_dir="features", do_eval=True, task="caption", output_dir="output", export_attention_scores=False):
-        self.data_dir = data_dir
-        self.features_dir = features_dir
-        self.do_pretrain = False
-        self.use_prefix_tuning = False
-        self.do_train = not do_eval
-        self.do_eval = do_eval
-        self.train_csv = "{}/ourds_train.44k.csv".format(self.data_dir)
-        self.val_csv = "{}/ourds_JSFUSION_test.csv".format(self.data_dir)
-        self.data_path = "{}/new_ourds_description_only.json".format(self.data_dir)
-        self.bbx_features_path = "{}/cls2_ball_basket_sum_concat_original_courtline_fea_1.pickle".format(self.data_dir)
-        self.features_path = "{}/ourds_videos_timesformer_features.pickle".format(self.features_dir)
-        self.audio_features_path = "{}/ourds_audio_VGGish_features.pkl".format(self.data_dir)
-        self.num_thread_reader = 0
-        self.lr = 3e-5
-        self.epochs = 10
-        self.batch_size = 32
-        self.batch_size_val = 16
-        self.lr_decay = 0.9
-        self.n_display = 100
-        self.video_dim = 768
-        self.audio_dim = 128
-        self.seed = 42
-        self.max_words = 30
-        self.max_frames = 48
-        self.feature_framerate = 1
-        self.min_time = 5.0
-        self.margin = 0.1
-        self.hard_negative_rate = 0.5
-        self.negative_weighting = 1
-        self.n_pair = 1
-        self.output_dir = '{}/{}'.format(os.environ["DIR_PATH"], output_dir)
-        self.bert_model = "bert-base-uncased"
-        self.visual_model = "visual-base"
-        self.cross_model = "cross-base"
-        self.decoder_model = "decoder-base"
-        self.init_model = "{}/weight/univl.pretrained.bin".format(".")
-        self.do_lower_case = True
-        self.warmup_proportion = 0.1
-        self.gradient_accumulation_steps = 1
-        self.n_gpu = 1
-        self.cache_dir = ""
-        self.fp16 = False
-        self.fp16_opt_level = 'O1'
-        self.task_type = task 
-        self.datatype = "" 
-        self.world_size = 0
-        self.local_rank = 0
-        self.coef_lr = 0.1
-        self.use_mil = False
-        self.context_only = False
-        self.multibbxs = True
-        self.sampled_use_mil = False
-        self.text_num_hidden_layers = 12
-        self.visual_num_hidden_layers = 6
-        self.cross_num_hidden_layers = 3
-        self.decoder_num_hidden_layers = 3
-        self.visual_use_diagonal_masking = False
-        self.train_tasks = [0,0,1,0]
-        self.test_tasks = [0,0,1,0]
-        self.t1_postprocessing = True
-        self.player_embedding = "CLIP" # BERT, CLIP, none, BERT-Stat
-        self.player_embedding_order = "lineup" # lineup, lineup-ordered, posession, none, BC
-        self.use_BBX_features = True
-        self.max_rand_players = 5
 if __name__ == "__main__":
-    args = None
-    
-    args = Args_Caption(features_dir="data", do_eval=False, output_dir="Finetuned_models/tmp3", export_attention_scores=False, task="caption-CLIP")
-    args.freeze_encoder = False
+    args = get_args()
     init_training_caption(args)
 

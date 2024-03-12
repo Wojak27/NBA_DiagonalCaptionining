@@ -134,6 +134,11 @@ def get_args(description='UniVL on Caption Task'):
     parser.add_argument('--visual_num_hidden_layers', type=int, default=3, help="Layer NO. of visual.")
     parser.add_argument('--cross_num_hidden_layers', type=int, default=3, help="Layer NO. of cross.")
     parser.add_argument('--decoder_num_hidden_layers', type=int, default=6, help="Layer NO. of decoder.")
+    parser.add_argument("--visual_use_diagonal_masking", action='store_true', help="Use diagonal masking for visual features")
+    parser.add_argument("--player_embedding", default="CLIP", choices=["BERT", "CLIP", "none", "BERT-Stat"], help="Type of player embedding to use")
+    parser.add_argument("--player_embedding_order", default="lineup", choices=["lineup", "lineup-ordered", "posession", "none", "BC"], help="Order of player embedding")
+    parser.add_argument("--use_BBX_features", action='store_true', help="Use bounding box features")
+    parser.add_argument("--max_rand_players", type=int, default=5, help="Maximum number of random players")
 
     '''
     T1: Player Recognition
@@ -988,22 +993,7 @@ def main(args):
             eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalObj=nlgEvalObj)
 
 if __name__ == "__main__":
-    args = None
-    
-
-    
-    args = Args_Caption(features_dir="data", do_eval=False, output_dir="Finetuned_models/tmp2", export_attention_scores=False)
-    args.freeze_encoder = False
-    args.train_tasks = [1,0,0,0]
-    args.test_tasks = [1,0,0,0]
-    args.batch_size = 32
-    args.batch_size_val = 16
-    args.t1_postprocessing = True
-    args.player_embedding_order = "possession"
-    args.visual_use_diagonal_masking = True
-    args.player_embedding = "CLIP"
-    args.use_BBX_features = False
-    args.datatype = "ourds-DAM"
+    args = get_args()
     main(args)
 
 
