@@ -19,7 +19,7 @@ import argparse
 import json
 from dataloaders.dataloader_ourds_CLIP import OURDS_CLIP_DataLoader
 from eval_utils import acc_iou, mean_category_acc, success_rate
-from main_task_caption_CLIP import Args_Caption
+from main_task_caption_DAM import Args_Caption
 from modules.tokenization import BertTokenizer
 from modules.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from modules.modeling import UniVL
@@ -58,17 +58,7 @@ def get_args(description='UniVL on Caption Task'):
     court_features_path:        [Timesformer] on plotted courtling seg,     shape [numFrames, dimFeature (768 * 2)]
     bbx_features_path:          [Timesformer] on summed cls2+ball+basket,   shape [numFrames, dimFeature (768)]
     '''
-    # parser.add_argument('--features_path', type=str, default='/local/riemann1/home/zhufl/hdd1/UniVL_processing_code/ourds_videos_timesformer_features.pickle',
-    #                     help='feature path for 2D features')
-    # parser.add_argument('--courtseg_features_path', type=str, default='/local/riemann1/home/zhufl/hdd1/UniVL_processing_code/ourds_courtlineseg_data/ourds_videos_features.pickle',
-    #                     help='feature path for 2D features')
-    # parser.add_argument('--bbxcls2_features_path', type=str, default='/local/riemann1/home/zhufl/hdd1/UniVL_processing_code/ourds_cls2_data/ourds_videos_features.pickle',
-    #                     help='feature path for 2D features')
-    # parser.add_argument('--bbxball_features_path', type=str, default='/local/riemann1/home/zhufl/hdd1/UniVL_processing_code/ourds_ball_data/ourds_videos_features.pickle',
-    #                     help='feature path for 2D features')
-    # parser.add_argument('--bbxbasket_features_path', type=str, default='/local/riemann1/home/zhufl/hdd1/UniVL_processing_code/ourds_basket_data/ourds_videos_features.pickle',
-    #                     help='feature path for 2D features')
-
+    
     "Use re-organzied feature from JackWu"
     parser.add_argument('--cls2_ball_basket_sum_concat_courtseg_path', type=str, default='./data/cls2_ball_basket_sum_concat_original_courtline_fea.pickle',
                         help='feature path for 2D features')
@@ -92,17 +82,12 @@ def get_args(description='UniVL on Caption Task'):
     parser.add_argument('--negative_weighting', type=int, default=1, help='Weight the loss for intra negative')
     parser.add_argument('--n_pair', type=int, default=1, help='Num of pair to output from data loader')
 
-    # parser.add_argument("--output_dir", default='/media/chris/hdd1/UniVL_processing_code/ourds_data/ckpt_ourds_caption', type=str, required=False,
-    #                     help="The output directory where the model predictions and checkpoints will be written.")
-    # parser.add_argument("--output_dir", default='/media/chris/hdd1/UniVL_processing_code/multifea_action_recongition/ckpt_ourds_caption', type=str, required=False,
-                        # help="The output directory where the model predictions and checkpoints will be written.")
     parser.add_argument("--output_dir", default='./output/ckpt_ourds_caption_actionFine', type=str, required=False,
                             help="The output directory where the model predictions and checkpoints will be written.")
     parser.add_argument("--bert_model", default="bert-base-uncased", type=str, required=False, help="Bert pre-trained model")
     parser.add_argument("--visual_model", default="visual-base", type=str, required=False, help="Visual module")
     parser.add_argument("--cross_model", default="cross-base", type=str, required=False, help="Cross module")
     parser.add_argument("--decoder_model", default="decoder-base", type=str, required=False, help="Decoder module")
-    # parser.add_argument("--init_model", default='/media/chris/hdd1/UniVL_processing_code/UniVL-main/weight/univl.pretrained.bin', type=str, required=False, help="Initial model.")
     parser.add_argument("--init_model", default='./weight/univl.pretrained.bin', type=str, required=False, help="Initial model.")
 
     parser.add_argument("--do_lower_case", action='store_true', help="Set this flag if you are using an uncased model.")
@@ -176,9 +161,7 @@ def set_seed_logger(args):
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
-    # world_size = torch.distributed.get_world_size()
     torch.cuda.set_device(args.local_rank)
-    # args.world_size = world_size
 
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir, exist_ok=True)
@@ -218,7 +201,6 @@ def init_model(args, device, n_gpu, local_rank, type_vocab_size=2):
     cache_dir = args.cache_dir if args.cache_dir else os.path.join(str(PYTORCH_PRETRAINED_BERT_CACHE), 'distributed')
     model = UniVL.from_pretrained(args.bert_model, args.visual_model, args.cross_model, args.decoder_model,
                                    cache_dir=cache_dir, state_dict=model_state_dict, task_config=args, type_vocab_size=type_vocab_size)
-    # model = model.float()
     model.to(device)
 
     return model
@@ -256,158 +238,6 @@ def prep_optimizer(args, model, num_train_optimization_steps, device, n_gpu, loc
     #                                                   output_device=local_rank, find_unused_parameters=True)
 
     return optimizer, scheduler, model
-
-def dataloader_youcook_train(args, tokenizer):
-    youcook_dataset = Youcook_Caption_DataLoader(
-        csv=args.train_csv,
-        data_path=args.data_path,
-        features_path=args.features_path,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-    )
-
-    train_sampler = torch.utils.data.distributed.DistributedSampler(youcook_dataset)
-    dataloader = DataLoader(
-        youcook_dataset,
-        batch_size=args.batch_size // args.n_gpu,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        shuffle=(train_sampler is None),
-        sampler=train_sampler,
-        drop_last=True,
-    )
-
-    return dataloader, len(youcook_dataset), train_sampler
-
-def dataloader_youcook_test(args, tokenizer):
-    youcook_testset = Youcook_Caption_DataLoader(
-        csv=args.val_csv,
-        data_path=args.data_path,
-        features_path=args.features_path,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-    )
-
-    test_sampler = SequentialSampler(youcook_testset)
-    dataloader_youcook = DataLoader(
-        youcook_testset,
-        sampler=test_sampler,
-        batch_size=args.batch_size_val,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-    )
-
-    if args.local_rank == 0:
-        logger.info('YoucookII validation pairs: {}'.format(len(youcook_testset)))
-    return dataloader_youcook, len(youcook_testset)
-
-def dataloader_msrvtt_train(args, tokenizer):
-    msrvtt_dataset = MSRVTT_Caption_DataLoader(
-        csv_path=args.train_csv,
-        json_path=args.data_path,
-        features_path=args.features_path,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type="train",
-    )
-
-    train_sampler = torch.utils.data.distributed.DistributedSampler(msrvtt_dataset)
-    dataloader = DataLoader(
-        msrvtt_dataset,
-        batch_size=args.batch_size // args.n_gpu,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        shuffle=(train_sampler is None),
-        sampler=train_sampler,
-        drop_last=True,
-    )
-
-    return dataloader, len(msrvtt_dataset), train_sampler
-
-def dataloader_msrvtt_test(args, tokenizer, split_type="test",):
-    msrvtt_testset = MSRVTT_Caption_DataLoader(
-        csv_path=args.val_csv,
-        json_path=args.data_path,
-        features_path=args.features_path,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type=split_type,
-    )
-
-    test_sampler = SequentialSampler(msrvtt_testset)
-    dataloader_msrvtt = DataLoader(
-        msrvtt_testset,
-        sampler=test_sampler,
-        batch_size=args.batch_size_val,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        drop_last=False,
-    )
-    return dataloader_msrvtt, len(msrvtt_testset)
-
-def dataloader_ourds_train(args, tokenizer, action_converter=None):
-    ourds_dataset = OURDS_Caption_DataLoader(
-        csv_path=args.train_csv,
-        json_path=args.data_path,
-        video_feature=args.video_feature,
-        feature_tuples=args.feature_tuple,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type="train",
-        split_task = args.train_tasks,
-        gameid2videoid='./data/gameid_eventid2vid.json',
-        action_convert_dict=action_converter
-    )
-
-    dataloader = DataLoader(
-        ourds_dataset,
-        batch_size=args.batch_size // args.n_gpu,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        shuffle=True,
-        drop_last=True,
-    )
-
-    return dataloader, len(ourds_dataset), None
-
-def dataloader_ourds_test(args, tokenizer, split_type="test", action_converter=None):
-    ourds_testset = OURDS_Caption_DataLoader(
-        csv_path=args.val_csv,
-        json_path=args.data_path,
-        video_feature=args.video_feature,
-        feature_tuples=args.feature_tuple,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type=split_type,
-        split_task = args.test_tasks,
-        gameid2videoid = './data/gameid_eventid2vid.json',
-        action_convert_dict=action_converter
-
-    )
-
-    test_sampler = SequentialSampler(ourds_testset)
-    dataloader_ourds = DataLoader(
-        ourds_testset,
-        sampler=test_sampler,
-        batch_size=args.batch_size_val,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        # drop_last=False,
-        drop_last=True,
-    )
-    return dataloader_ourds, len(ourds_testset)
 
 def dataloader_ourds_CLIP_train(args, tokenizer, action_converter=None):
     ourds_dataset = OURDS_CLIP_DataLoader(
@@ -935,19 +765,6 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
     else:
         all_caption_lists = [all_caption_lists]
 
-    # Evaluate
-    # for task in test_tasks:
-    #     r  = [caption_list_byTask[task]]
-    #     h  = result_list_byTask[task]
-    #     # Is this the place where I should put the Precision/Recall/AUC curve?
-
-    #     metrics_nlg = nlgEvalObj.compute_metrics(ref_list=r, hyp_list=h)
-    #     logger.info(">>> TASK {:d}: BLEU_1: {:.4f}, BLEU_2: {:.4f}, BLEU_3: {:.4f}, BLEU_4: {:.4f}".
-    #                 format(task, metrics_nlg["Bleu_1"], metrics_nlg["Bleu_2"], metrics_nlg["Bleu_3"], metrics_nlg["Bleu_4"]))
-    #     logger.info(">>> TASK {:d}: METEOR: {:.4f}, ROUGE_L: {:.4f}, CIDEr: {:.4f}".format(task, metrics_nlg["METEOR"], metrics_nlg["ROUGE_L"], metrics_nlg["CIDEr"]))
-
-    #     Bleu_4 = metrics_nlg["Bleu_4"]
-    
     if wandb is not None:
         scores = {
             "Action_SR": sum(sr_list)/ len(sr_list),
@@ -960,10 +777,7 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
     return sum(sr_list)/ len(sr_list), sum(acc_list)/ len(acc_list), sum(mIoU)/ len(mIoU), sum(mInter) / len(mInter)
 
 DATALOADER_DICT = {}
-DATALOADER_DICT["youcook"] = {"train":dataloader_youcook_train, "val":dataloader_youcook_test}
-DATALOADER_DICT["msrvtt"] = {"train":dataloader_msrvtt_train, "val":dataloader_msrvtt_test}
-DATALOADER_DICT["ourds"] = {"train":dataloader_ourds_train, "val":dataloader_ourds_test}
-DATALOADER_DICT["ourds-CLIP"] = {"train":dataloader_ourds_CLIP_train, "val":dataloader_ourds_CLIP_test}
+DATALOADER_DICT["ourds-DAM"] = {"train":dataloader_ourds_CLIP_train, "val":dataloader_ourds_CLIP_test}
 
 "Set the action-level to have results for different level"
 # action_list = json.load(open('/media/chris/hdd1/UniVL_processing_code/UniVL-main/action_list.json', 'r'))
@@ -1062,32 +876,16 @@ def main(args):
     for action_token, action_description in action_token2full_description.items():
         ids = tokenizer_original.convert_tokens_to_ids(tokenizer_original.tokenize(action_description))
         action_token = tokenizer_original.tokenize(action_token)
-        random_action_embed = model.bert.embeddings.word_embeddings.weight[tokenizer.convert_tokens_to_ids(action_token)]
         new_action_embed = torch.mean(model.bert.embeddings.cpu()(torch.tensor([ids])),dim=1)
-        #new_action_embed = new_action_embed.to(random_action_embed.device)
-        cos = nn.CosineSimilarity(dim=1, eps=1e-6)
-        output = cos(random_action_embed.cpu(), new_action_embed)
-        #print(output)
         with torch.no_grad():
             model.bert.embeddings.word_embeddings.weight[tokenizer.convert_tokens_to_ids(action_token)] = new_action_embed
             model.decoder.embeddings.word_embeddings.weight[tokenizer.convert_tokens_to_ids(action_token)] = new_action_embed
-        random_action_embed = model.bert.embeddings.word_embeddings.weight[tokenizer.convert_tokens_to_ids(action_token)]
-        output = cos(random_action_embed, new_action_embed)
-        # print(output)
-        output = cos(model.decoder.embeddings.word_embeddings.weight[tokenizer.convert_tokens_to_ids(action_token)], new_action_embed)
-        # print(output)
-        # print("Convert: ",tokenizer_original.convert_ids_to_tokens(ids), "Orig: ",action_description)
+
     model.to(device)
     model.bert.to(device)
     model.bert.embeddings.to(device)
     model.bert.embeddings.word_embeddings.to(device)
 
-    # for name, param in model.named_parameters():
-    #     if param.requires_grad:
-    #         if 'bert' in name:
-    #             print(name)
-    #     else:
-    #         print(name)
     assert args.task_type == "caption"
     nlgEvalObj = NLGEval(no_overlap=False, no_skipthoughts=True, no_glove=True, metrics_to_omit=None)
 
@@ -1101,19 +899,12 @@ def main(args):
         args.feature_tuple[name] = []
         logger.info(" Loading feature pickle from %s", path)
 
-        # if name == 'allplayer':
-        #     # Use online-reading, thus there is None pickle to the list 
-        #     args.feature_tuple[name].append(None)
-        # else:
         with open(path, 'rb') as f:
             data = pickle.load(f)
         
         for key, value in data.items():
             data.update({key: data[key].transpose(1, 2, 0).reshape(-1, 768*2)})
         
-        # data_to_save = []
-        # data_to_save.append(data)
-        # args.feature_tuple[name].append(pickle.load(open(path, 'rb')))
         args.feature_tuple[name].append(data)
 
         assert name in ['bbx', 'courtseg', 'keypoint', 'allplayer', 'bbxcls2', 'bbxball', 'bbxbasket']
@@ -1131,8 +922,6 @@ def main(args):
             args.feature_tuple[name].append((30, 10, 768)) # For allplayer, [numFrame, numPlayer, dimFeature]
 
     "Check the common keys in all feature_tuple"
-    # print("non-commone elements in features: {}".format([x for x in aa if x not in bbb]))
-    # breakpoint()
 
     val_dataloader, val_length = DATALOADER_DICT[args.datatype]["val"](args, tokenizer, split_type='val', action_converter=action_converter_level[args.action_level])
     test_dataloader, test_length = DATALOADER_DICT[args.datatype]["val"](args, tokenizer, split_type='test', action_converter=action_converter_level[args.action_level])
@@ -1220,14 +1009,13 @@ if __name__ == "__main__":
     args.t1_postprocessing = True
     if pretrained:
         args.init_model = "{}/MAEpretrained_models/out_pretrain_6e_0b_3c_1d_audio_kinetics_scaled_90prob_3_mEncL_896bs/pytorch_model.bin.pretrain.200".format(os.environ["DIR_PATH"])
-        # args.init_model = "{}/Finetuned_models/3e6c3c_kinetics/pytorch_model.bin.11".format(os.environ["DIR_PATH"])
     args.t1_postprocessing = False
     args.player_embedding_order = "lineup"
     args.use_random_embeddings = False
     args.visual_use_diagonal_masking = False
     args.player_embedding = "CLIP"
     args.use_BBX_features = True
-    args.datatype = "ourds-CLIP"
+    args.datatype = "ourds-DAM"
     
     main(args)
 

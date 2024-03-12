@@ -256,154 +256,6 @@ def prep_optimizer(args, model, num_train_optimization_steps, device, n_gpu, loc
 
     return optimizer, scheduler, model
 
-def dataloader_youcook_train(args, tokenizer):
-    youcook_dataset = Youcook_Caption_DataLoader(
-        csv=args.train_csv,
-        data_path=args.data_path,
-        features_path=args.features_path,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-    )
-
-    train_sampler = torch.utils.data.distributed.DistributedSampler(youcook_dataset)
-    dataloader = DataLoader(
-        youcook_dataset,
-        batch_size=args.batch_size // args.n_gpu,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        shuffle=(train_sampler is None),
-        sampler=train_sampler,
-        drop_last=True,
-    )
-
-    return dataloader, len(youcook_dataset), train_sampler
-
-def dataloader_youcook_test(args, tokenizer):
-    youcook_testset = Youcook_Caption_DataLoader(
-        csv=args.val_csv,
-        data_path=args.data_path,
-        features_path=args.features_path,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-    )
-
-    test_sampler = SequentialSampler(youcook_testset)
-    dataloader_youcook = DataLoader(
-        youcook_testset,
-        sampler=test_sampler,
-        batch_size=args.batch_size_val,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-    )
-
-    if args.local_rank == 0:
-        logger.info('YoucookII validation pairs: {}'.format(len(youcook_testset)))
-    return dataloader_youcook, len(youcook_testset)
-
-def dataloader_msrvtt_train(args, tokenizer):
-    msrvtt_dataset = MSRVTT_Caption_DataLoader(
-        csv_path=args.train_csv,
-        json_path=args.data_path,
-        features_path=args.features_path,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type="train",
-    )
-
-    train_sampler = torch.utils.data.distributed.DistributedSampler(msrvtt_dataset)
-    dataloader = DataLoader(
-        msrvtt_dataset,
-        batch_size=args.batch_size // args.n_gpu,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        shuffle=(train_sampler is None),
-        sampler=train_sampler,
-        drop_last=True,
-    )
-
-    return dataloader, len(msrvtt_dataset), train_sampler
-
-def dataloader_msrvtt_test(args, tokenizer, split_type="test",):
-    msrvtt_testset = MSRVTT_Caption_DataLoader(
-        csv_path=args.val_csv,
-        json_path=args.data_path,
-        features_path=args.features_path,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type=split_type,
-    )
-
-    test_sampler = SequentialSampler(msrvtt_testset)
-    dataloader_msrvtt = DataLoader(
-        msrvtt_testset,
-        sampler=test_sampler,
-        batch_size=args.batch_size_val,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        drop_last=False,
-    )
-    return dataloader_msrvtt, len(msrvtt_testset)
-
-def dataloader_ourds_train(args, tokenizer):
-    ourds_dataset = OURDS_Caption_DataLoader(
-        csv_path=args.train_csv,
-        json_path=args.data_path,
-        video_feature=args.video_feature,
-        feature_tuples=args.feature_tuple,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type="train",
-        split_task = args.train_tasks,
-        gameid2videoid='./data/gameid_eventid2vid.json',
-    )
-
-    dataloader = DataLoader(
-        ourds_dataset,
-        batch_size=args.batch_size // args.n_gpu,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        shuffle=True,
-        drop_last=True,
-    )
-
-    return dataloader, len(ourds_dataset), None
-
-def dataloader_ourds_test(args, tokenizer, split_type="test"):
-    ourds_testset = OURDS_Caption_DataLoader(
-        csv_path=args.val_csv,
-        json_path=args.data_path,
-        video_feature=args.video_feature,
-        feature_tuples=args.feature_tuple,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type=split_type,
-        split_task = args.test_tasks,
-        gameid2videoid='./data/gameid_eventid2vid.json',
-    )
-
-    test_sampler = SequentialSampler(ourds_testset)
-    dataloader_ourds = DataLoader(
-        ourds_testset,
-        sampler=test_sampler,
-        batch_size=args.batch_size_val,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        # drop_last=False,
-        drop_last=True,
-    )
-    return dataloader_ourds, len(ourds_testset)
 
 def dataloader_ourds_CLIP_train(args, tokenizer):
     ourds_dataset = OURDS_CLIP_DataLoader(
@@ -951,10 +803,7 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
     return sum(sr_list)/ len(sr_list), sum(acc_list)/ len(acc_list), sum(mIoU)/ len(mIoU), sum(mInter) / len(mInter)
 
 DATALOADER_DICT = {}
-DATALOADER_DICT["youcook"] = {"train":dataloader_youcook_train, "val":dataloader_youcook_test}
-DATALOADER_DICT["msrvtt"] = {"train":dataloader_msrvtt_train, "val":dataloader_msrvtt_test}
-DATALOADER_DICT["ourds"] = {"train":dataloader_ourds_train, "val":dataloader_ourds_test}
-DATALOADER_DICT["ourds-CLIP"] = {"train":dataloader_ourds_CLIP_train, "val":dataloader_ourds_CLIP_test}
+DATALOADER_DICT["ourds-DAM"] = {"train":dataloader_ourds_CLIP_train, "val":dataloader_ourds_CLIP_test}
 
 action_list = json.load(open('./data/action_list.json', 'r'))
 action_token2full_description = {'action%s'%a_idx:a_l.lower().replace('_',' ').replace('-',' ') for a_idx, a_l in enumerate(action_list)}
@@ -1011,21 +860,12 @@ def main(args):
             model.decoder.embeddings.word_embeddings.weight[tokenizer.convert_tokens_to_ids([action_token])] = new_action_embed
         random_action_embed = model.bert.embeddings.word_embeddings.weight[tokenizer.convert_tokens_to_ids([action_token])]
         output = cos(random_action_embed, new_action_embed)
-        # print(output)
         output = cos(model.decoder.embeddings.word_embeddings.weight[tokenizer.convert_tokens_to_ids([action_token])], new_action_embed)
-        # print(output)
-        #print(tokenizer_original.convert_ids_to_tokens(ids))
     model.to(device)
     model.bert.to(device)
     model.bert.embeddings.to(device)
     model.bert.embeddings.word_embeddings.to(device)
 
-    # for name, param in model.named_parameters():
-    #     if param.requires_grad:
-    #         if 'bert' in name:
-    #             print(name)
-    #     else:
-    #         print(name)
     assert args.task_type == "caption"
     nlgEvalObj = NLGEval(no_overlap=False, no_skipthoughts=True, no_glove=True, metrics_to_omit=None)
 
@@ -1160,11 +1000,10 @@ if __name__ == "__main__":
     args.batch_size_val = 16
     args.t1_postprocessing = True
     args.player_embedding_order = "possession"
-    args.use_random_embeddings = False
     args.visual_use_diagonal_masking = True
     args.player_embedding = "CLIP"
     args.use_BBX_features = False
-    args.datatype = "ourds-CLIP"
+    args.datatype = "ourds-DAM"
     main(args)
 
 

@@ -244,461 +244,6 @@ def prep_optimizer(args, model, num_train_optimization_steps, device, n_gpu, loc
 
     return optimizer, scheduler, model
 
-def dataloader_youcook_train(args, tokenizer):
-    youcook_dataset = Youcook_Caption_DataLoader(
-        csv=args.train_csv,
-        data_path=args.data_path,
-        features_path=args.features_path,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-    )
-
-    train_sampler = torch.utils.data.distributed.DistributedSampler(youcook_dataset)
-    dataloader = DataLoader(
-        youcook_dataset,
-        batch_size=args.batch_size // args.n_gpu,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        shuffle=(train_sampler is None),
-        sampler=train_sampler,
-        drop_last=True,
-    )
-
-    return dataloader, len(youcook_dataset), train_sampler
-
-def dataloader_youcook_test(args, tokenizer):
-    youcook_testset = Youcook_Caption_DataLoader(
-        csv=args.val_csv,
-        data_path=args.data_path,
-        features_path=args.features_path,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-    )
-
-    test_sampler = SequentialSampler(youcook_testset)
-    dataloader_youcook = DataLoader(
-        youcook_testset,
-        sampler=test_sampler,
-        batch_size=args.batch_size_val,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-    )
-
-    if args.local_rank == 0:
-        logger.info('YoucookII validation pairs: {}'.format(len(youcook_testset)))
-    return dataloader_youcook, len(youcook_testset)
-
-
-def dataloader_msrvtt_train(args, tokenizer):
-    msrvtt_dataset = MSRVTT_Caption_DataLoader(
-        csv_path=args.train_csv,
-        json_path=args.data_path,
-        features_path=args.features_path,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type="train",
-    )
-
-    train_sampler = torch.utils.data.distributed.DistributedSampler(msrvtt_dataset)
-    dataloader = DataLoader(
-        msrvtt_dataset,
-        batch_size=args.batch_size // args.n_gpu,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        shuffle=(train_sampler is None),
-        sampler=train_sampler,
-        drop_last=True,
-    )
-
-    return dataloader, len(msrvtt_dataset), train_sampler
-
-def dataloader_msrvtt_test(args, tokenizer, split_type="test",):
-    msrvtt_testset = MSRVTT_Caption_DataLoader(
-        csv_path=args.val_csv,
-        json_path=args.data_path,
-        features_path=args.features_path,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type=split_type,
-    )
-
-    test_sampler = SequentialSampler(msrvtt_testset)
-    dataloader_msrvtt = DataLoader(
-        msrvtt_testset,
-        sampler=test_sampler,
-        batch_size=args.batch_size_val,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        drop_last=False,
-    )
-    return dataloader_msrvtt, len(msrvtt_testset)
-
-def dataloader_anetc3d_caption_audio_train(args, tokenizer):
-    anet_dataset = ActivityNet_Caption_DataLoader_Audio(
-        annotations_path="/4TBSSD_permanent/collaborative-experts/data/anet_caption/train_ids.json",
-        v_features_path="/4TBSSD_permanent/collaborative-experts/data/anet_caption/anet_c3d_train.pkl",
-        a_features_path="/4TBSSD_permanent/collaborative-experts/data/activity_net/data/activity-net/structured-symlinks/aggregated_audio/vggish-audio-raw.pickle",
-        json_path="/4TBSSD_permanent/collaborative-experts/data/anet_caption/train.json",
-        max_words=args.max_words,
-        feature_framerate=1,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type="train",
-    )
-    dataloader = DataLoader(
-        anet_dataset,
-        batch_size=args.batch_size // args.n_gpu,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        shuffle=True,
-        drop_last=True,
-    )
-
-    return dataloader, len(anet_dataset), None
-
-def dataloader_anetc3d_caption_audio_test(args, tokenizer, split_type="test"):
-    if split_type == "test":
-        json_path = "/4TBSSD_permanent/collaborative-experts/data/anet_caption/val_2.json"
-    else:
-        json_path = "/4TBSSD_permanent/collaborative-experts/data/anet_caption/val_1.json"
-    anet_testset = ActivityNet_Caption_DataLoader_Audio(
-        annotations_path="/4TBSSD_permanent/collaborative-experts/data/anet_caption/val_ids.json",
-        v_features_path="/4TBSSD_permanent/collaborative-experts/data/anet_caption/anet_c3d_val.pkl",
-        a_features_path="/4TBSSD_permanent/collaborative-experts/data/activity_net/data/activity-net/structured-symlinks/aggregated_audio/vggish-audio-raw.pickle",
-        json_path=json_path,
-        max_words=args.max_words,
-        feature_framerate=1,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type=split_type,
-    )
-
-    test_sampler = SequentialSampler(anet_testset)
-    dataloader_anet = DataLoader(
-        anet_testset,
-        sampler=test_sampler,
-        batch_size=args.batch_size_val,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        drop_last=False,
-    )
-    return dataloader_anet, len(anet_testset)
-
-def dataloader_anetc3d_caption_flow_train(args, tokenizer):
-    anet_dataset = ActivityNet_Caption_DataLoader_Flow(
-        annotations_path="/4TBSSD_permanent/collaborative-experts/data/anet_caption/train_ids.json",
-        v_features_path="/4TBSSD_permanent/collaborative-experts/data/activity_net/env_c3d",
-        a_features_path="/4TBSSD_permanent/collaborative-experts/data/activity_net/training",
-        json_path="/4TBSSD_permanent/collaborative-experts/data/anet_caption/train.json",
-        max_words=args.max_words,
-        feature_framerate=1,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type="train",
-    )
-    dataloader = DataLoader(
-        anet_dataset,
-        batch_size=args.batch_size // args.n_gpu,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        shuffle=True,
-        drop_last=True,
-    )
-
-    return dataloader, len(anet_dataset), None
-
-def dataloader_anetc3d_caption_flow_test(args, tokenizer, split_type="test"):
-    if split_type == "test":
-        json_path = "/4TBSSD_permanent/collaborative-experts/data/anet_caption/val_2.json"
-    else:
-        json_path = "/4TBSSD_permanent/collaborative-experts/data/anet_caption/val_1.json"
-    anet_testset = ActivityNet_Caption_DataLoader_Flow(
-        annotations_path="/4TBSSD_permanent/collaborative-experts/data/anet_caption/val_ids.json",
-        v_features_path="/4TBSSD_permanent/collaborative-experts/data/activity_net/env_c3d",
-        a_features_path="/4TBSSD_permanent/collaborative-experts/data/activity_net/validation",
-        json_path=json_path,
-        max_words=args.max_words,
-        feature_framerate=1,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type=split_type,
-    )
-
-    test_sampler = SequentialSampler(anet_testset)
-    dataloader_anet = DataLoader(
-        anet_testset,
-        sampler=test_sampler,
-        batch_size=args.batch_size_val,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        drop_last=False,
-    )
-    return dataloader_anet, len(anet_testset)
-
-def dataloader_anetc3d_caption_flow_pickle_train(args, tokenizer):
-    anet_dataset = ActivityNet_Caption_DataLoader_Flow_Pickle(
-        annotations_path="/proj/nba_multimodal_video/users/x_karwo/NBA_paper/NSVA/data/activitynet_captions/anet_caption/train_ids.json",
-        v_features_path="/proj/nba_multimodal_video/users/x_karwo/NBA_paper/NSVA/data/activitynet_captions/anet_caption/anet_c3d_train.pkl",
-        a_features_path="/proj/nba_multimodal_video/users/x_karwo/NBA_paper/NSVA/data/activitynet_captions/anet_caption/anet_flow_train.pkl",
-        json_path="/proj/nba_multimodal_video/users/x_karwo/NBA_paper/NSVA/data/activitynet_captions/anet_caption/train.json",
-        max_words=args.max_words,
-        feature_framerate=1,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type="train",
-    )
-    dataloader = DataLoader(
-        anet_dataset,
-        batch_size=args.batch_size // args.n_gpu,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        shuffle=True,
-        drop_last=True,
-    )
-
-    return dataloader, len(anet_dataset), None
-
-def dataloader_anetc3d_caption_flow_pickle_test(args, tokenizer, split_type="test"):
-    if split_type == "test":
-        json_path = "/proj/nba_multimodal_video/users/x_karwo/NBA_paper/NSVA/data/activitynet_captions/anet_caption/val_2.json"
-    else:
-        json_path = "/proj/nba_multimodal_video/users/x_karwo/NBA_paper/NSVA/data/activitynet_captions/anet_caption/val_1.json"
-    anet_testset = ActivityNet_Caption_DataLoader_Flow_Pickle(
-        annotations_path="/proj/nba_multimodal_video/users/x_karwo/NBA_paper/NSVA/data/activitynet_captions/anet_caption/val_ids.json",
-        v_features_path="/proj/nba_multimodal_video/users/x_karwo/NBA_paper/NSVA/data/activitynet_captions/anet_caption/anet_c3d_val.pkl",
-        a_features_path="/proj/nba_multimodal_video/users/x_karwo/NBA_paper/NSVA/data/activitynet_captions/anet_caption/anet_flow_val.pkl",
-        json_path=json_path,
-        max_words=args.max_words,
-        feature_framerate=1,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type=split_type,
-    )
-
-    test_sampler = SequentialSampler(anet_testset)
-    dataloader_anet = DataLoader(
-        anet_testset,
-        sampler=test_sampler,
-        batch_size=args.batch_size_val,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        drop_last=False,
-    )
-    return dataloader_anet, len(anet_testset)
-
-def dataloader_anet_caption_audio_train(args, tokenizer):
-    anet_dataset = ActivityNet_Caption_DataLoader_Audio(
-        annotations_path="/4TBSSD_permanent/collaborative-experts/data/anet_caption/train_ids.json",
-        v_features_path="/4TBSSD_permanent/collaborative-experts/data/anet_caption/anet_caption_tsp.pkl",
-        a_features_path="/4TBSSD_permanent/collaborative-experts/data/activity_net/data/activity-net/structured-symlinks/aggregated_audio/vggish-audio-raw.pickle",
-        json_path="/4TBSSD_permanent/collaborative-experts/data/anet_caption/train.json",
-        max_words=args.max_words,
-        feature_framerate=1,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type="train",
-    )
-    dataloader = DataLoader(
-        anet_dataset,
-        batch_size=args.batch_size // args.n_gpu,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        shuffle=True,
-        drop_last=True,
-    )
-
-    return dataloader, len(anet_dataset), None
-
-def dataloader_anet_caption_audio_test(args, tokenizer, split_type="test"):
-    if split_type == "test":
-        json_path = "/4TBSSD_permanent/collaborative-experts/data/anet_caption/val_2.json"
-    else:
-        json_path = "/4TBSSD_permanent/collaborative-experts/data/anet_caption/val_1.json"
-    anet_testset = ActivityNet_Caption_DataLoader_Audio(
-        annotations_path="/4TBSSD_permanent/collaborative-experts/data/anet_caption/val_ids.json",
-        v_features_path="/4TBSSD_permanent/collaborative-experts/data/anet_caption/anet_caption_tsp.pkl",
-        a_features_path="/4TBSSD_permanent/collaborative-experts/data/activity_net/data/activity-net/structured-symlinks/aggregated_audio/vggish-audio-raw.pickle",
-        json_path=json_path,
-        max_words=args.max_words,
-        feature_framerate=1,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type=split_type,
-    )
-
-    test_sampler = SequentialSampler(anet_testset)
-    dataloader_anet = DataLoader(
-        anet_testset,
-        sampler=test_sampler,
-        batch_size=args.batch_size_val,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        drop_last=False,
-    )
-    return dataloader_anet, len(anet_testset)
-
-def dataloader_msrvtt_audio_train(args, tokenizer):
-    msrvtt_dataset = MSRVTT_Caption_DataLoader_Audio(
-        annotations_path="/4TBSSD_permanent/collaborative-experts/data/msrvtt/data/MSRVTT/high-quality/structured-symlinks/train_list_full.txt",
-        v_features_path="/4TBSSD_permanent/collaborative-experts/data/msrvtt/msrvtt_videos_features.pickle",
-        a_features_path="/4TBSSD_permanent/collaborative-experts/data/msrvtt/data/MSRVTT/high-quality/structured-symlinks/aggregated_audio_feats/Audio_MSRVTT_new.pickle",
-        json_path="/4TBSSD_permanent/collaborative-experts/data/msrvtt/MSRVTT_data.json",
-        max_words=args.max_words,
-        feature_framerate=1,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type="train",
-    )
-
-    dataloader = DataLoader(
-        msrvtt_dataset,
-        batch_size=args.batch_size // args.n_gpu,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        shuffle=True,
-        drop_last=True,
-    )
-
-    return dataloader, len(msrvtt_dataset), None
-
-def dataloader_msrvtt_audio_test(args, tokenizer, split_type="test",):
-    if split_type == "test":
-        annotations_path = "/4TBSSD_permanent/collaborative-experts/data/msrvtt/data/MSRVTT/high-quality/structured-symlinks/test_list_full.txt"
-    else:
-        annotations_path = "/4TBSSD_permanent/collaborative-experts/data/msrvtt/data/MSRVTT/high-quality/structured-symlinks/val_list_full.txt"
-    msrvtt_testset = MSRVTT_Caption_DataLoader_Audio(
-        annotations_path=annotations_path,
-        v_features_path="/4TBSSD_permanent/collaborative-experts/data/msrvtt/msrvtt_videos_features.pickle",
-        a_features_path="/4TBSSD_permanent/collaborative-experts/data/msrvtt/data/MSRVTT/high-quality/structured-symlinks/aggregated_audio_feats/Audio_MSRVTT_new.pickle",
-        json_path="/4TBSSD_permanent/collaborative-experts/data/msrvtt/MSRVTT_data.json",
-        max_words=args.max_words,
-        feature_framerate=1,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type=split_type,
-    )
-
-    test_sampler = SequentialSampler(msrvtt_testset)
-    dataloader_msrvtt = DataLoader(
-        msrvtt_testset,
-        sampler=test_sampler,
-        batch_size=args.batch_size_val,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        drop_last=False,
-    )
-    return dataloader_msrvtt, len(msrvtt_testset)
-
-def dataloader_ourds_train(args, tokenizer):
-    ourds_dataset = OURDS_Caption_DataLoader(
-        csv_path=args.train_csv,
-        json_path=args.data_path,
-        video_feature=args.video_feature,
-        bbx_feature=args.video_bbx_feature,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type="train",
-        split_task = args.train_tasks
-    )
-
-    # train_sampler = torch.utils.data.Sampler(ourds_dataset)
-    dataloader = DataLoader(
-        ourds_dataset,
-        batch_size=args.batch_size // args.n_gpu,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        shuffle=True,
-        drop_last=True,
-    )
-
-    return dataloader, len(ourds_dataset), None
-
-def dataloader_ourds_test(args, tokenizer, split_type="test"):
-    ourds_testset = OURDS_Caption_DataLoader(
-        csv_path=args.val_csv,
-        json_path=args.data_path,
-        video_feature=args.video_feature,
-        bbx_feature=args.video_bbx_feature,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type=split_type,
-        split_task = args.test_tasks
-    )
-
-    test_sampler = SequentialSampler(ourds_testset)
-    dataloader_ourds = DataLoader(
-        ourds_testset,
-        sampler=test_sampler,
-        batch_size=args.batch_size_val,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        drop_last=False
-    )
-    return dataloader_ourds, len(ourds_testset)
-
-def dataloader_ourds_lang_train(args, tokenizer):
-    ourds_dataset = OURDS_Caption_Lang_DataLoader(
-        csv_path=args.train_csv,
-        json_path=args.data_path,
-        video_feature=args.video_feature,
-        bbx_feature=args.video_bbx_feature,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type="train",
-        split_task = args.train_tasks
-    )
-
-    # train_sampler = torch.utils.data.Sampler(ourds_dataset)
-    dataloader = DataLoader(
-        ourds_dataset,
-        batch_size=args.batch_size // args.n_gpu,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        shuffle=True,
-        drop_last=True,
-    )
-
-    return dataloader, len(ourds_dataset), None
-
-def dataloader_ourds_lang_test(args, tokenizer, split_type="test"):
-    ourds_testset = OURDS_Caption_Lang_DataLoader(
-        csv_path=args.val_csv,
-        json_path=args.data_path,
-        video_feature=args.video_feature,
-        bbx_feature=args.video_bbx_feature,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type=split_type,
-        split_task = args.test_tasks
-    )
-
-    test_sampler = SequentialSampler(ourds_testset)
-    dataloader_ourds = DataLoader(
-        ourds_testset,
-        sampler=test_sampler,
-        batch_size=args.batch_size_val,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        drop_last=False
-    )
-    return dataloader_ourds, len(ourds_testset)
-
 def dataloader_ourds_CLIP_train(args, tokenizer):
     ourds_dataset = OURDS_CLIP_DataLoader(
         csv_path=args.train_csv,
@@ -758,187 +303,6 @@ def dataloader_ourds_CLIP_test(args, tokenizer, split_type="test"):
         use_BBX_features=args.use_BBX_features,
         player_embedding=args.player_embedding,
         max_rand_players=args.max_rand_players
-    )
-
-    test_sampler = SequentialSampler(ourds_testset)
-    dataloader_ourds = DataLoader(
-        ourds_testset,
-        sampler=test_sampler,
-        batch_size=args.batch_size_val,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        drop_last=False
-    )
-    return dataloader_ourds, len(ourds_testset)
-
-def dataloader_ourds_QA_train(args, tokenizer):
-    ourds_dataset = OURDS_QA_DataLoader(
-        csv_path=args.train_csv,
-        json_path="/home/karolwojtulewicz/code/NSVA/data/ourds_description_only.json",
-        video_feature=args.video_feature,
-        bbx_feature=args.video_bbx_feature,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type="train",
-        split_task = args.train_tasks,
-        use_answer=args.use_answer,
-        is_pretraining=args.do_pretrain,
-        num_samples=100000,
-        mask_prob=0.25,
-        only_players=True,
-        use_real_name=False
-    )
-
-    # train_sampler = torch.utils.data.Sampler(ourds_dataset)
-    dataloader = DataLoader(
-        ourds_dataset,
-        batch_size=args.batch_size // args.n_gpu,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        shuffle=True,
-        drop_last=True,
-    )
-
-    return dataloader, len(ourds_dataset), None
-
-def dataloader_ourds_QA_test(args, tokenizer, split_type="test"):
-    ourds_testset = OURDS_QA_DataLoader(
-        csv_path=args.val_csv,
-        json_path="/home/karolwojtulewicz/code/NSVA/data/video_qa_unique_with_answers.json",
-        video_feature=args.video_feature,
-        bbx_feature=args.video_bbx_feature,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type=split_type,
-        split_task = args.test_tasks,
-        use_answer=args.use_answer,
-        is_pretraining=args.do_pretrain,
-        num_samples=0,
-        only_players=True,
-        use_real_name=False
-    )
-
-    test_sampler = SequentialSampler(ourds_testset)
-    dataloader_ourds = DataLoader(
-        ourds_testset,
-        sampler=test_sampler,
-        batch_size=args.batch_size_val,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        drop_last=False
-    )
-    return dataloader_ourds, len(ourds_testset)
-
-def dataloader_ourds_QA_raw_train(args, tokenizer):
-    ourds_dataset = OURDS_QA_RAW_DataLoader(
-        csv_path=args.train_csv,
-        json_path="/home/karolwojtulewicz/code/NSVA/data/video_qa_unique_with_answers.json",
-        video_feature=args.video_feature,
-        bbx_feature=args.video_bbx_feature,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type="train",
-        split_task = args.train_tasks,
-        use_answer=args.use_answer,
-        is_pretraining=args.do_pretrain,
-        num_samples=0,
-        mask_prob=0.25,
-        only_players=False,
-        use_real_name=False,
-        fine_tune_extractor=True,
-        videos_filepath="/4TBSSD_permanent/NSVA/downscaled_videos"
-    )
-
-    # train_sampler = torch.utils.data.Sampler(ourds_dataset)
-    dataloader = DataLoader(
-        ourds_dataset,
-        batch_size=args.batch_size // args.n_gpu,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        shuffle=True,
-        drop_last=True,
-    )
-
-    return dataloader, len(ourds_dataset), None
-
-def dataloader_ourds_QA_raw_test(args, tokenizer, split_type="test"):
-    ourds_testset = OURDS_QA_RAW_DataLoader(
-        csv_path=args.val_csv,
-        json_path="/home/karolwojtulewicz/code/NSVA/data/video_qa_unique_with_answers.json",
-        video_feature=args.video_feature,
-        bbx_feature=args.video_bbx_feature,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type=split_type,
-        split_task = args.test_tasks,
-        use_answer=args.use_answer,
-        is_pretraining=args.do_pretrain,
-        num_samples=0,
-        only_players=False,
-        use_real_name=False,
-        fine_tune_extractor=True,
-        videos_filepath="/4TBSSD_permanent/NSVA/downscaled_videos"
-    )
-
-    test_sampler = SequentialSampler(ourds_testset)
-    dataloader_ourds = DataLoader(
-        ourds_testset,
-        sampler=test_sampler,
-        batch_size=args.batch_size_val,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        drop_last=False
-    )
-    return dataloader_ourds, len(ourds_testset)
-
-def dataloader_ourds_audio_bbx_train(args, tokenizer):
-    ourds_dataset = OURDS_Caption_Audio_BBX_DataLoader(
-        csv_path=args.train_csv,
-        json_path=args.data_path,
-        video_feature=args.video_feature,
-        bbx_feature=args.video_bbx_feature,
-        audio_feature=args.audio_feature,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type="train",
-        split_task = args.train_tasks
-    )
-
-    # train_sampler = torch.utils.data.Sampler(ourds_dataset)
-    dataloader = DataLoader(
-        ourds_dataset,
-        batch_size=args.batch_size // args.n_gpu,
-        num_workers=args.num_thread_reader,
-        pin_memory=False,
-        shuffle=True,
-        drop_last=True,
-    )
-
-    return dataloader, len(ourds_dataset), None
-
-def dataloader_ourds_audio_bbx_test(args, tokenizer, split_type="test"):
-    ourds_testset = OURDS_Caption_Audio_BBX_DataLoader(
-        csv_path=args.val_csv,
-        json_path=args.data_path,
-        video_feature=args.video_feature,
-        bbx_feature=args.video_bbx_feature,
-        audio_feature=args.audio_feature,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        split_type=split_type,
-        split_task = args.test_tasks
     )
 
     test_sampler = SequentialSampler(ourds_testset)
@@ -1067,13 +431,6 @@ def train_epoch(epoch, args, model, train_dataloader, tokenizer, device, n_gpu, 
             
             del video, bbx
             global_step += 1
-            # if global_step % log_step == 0 and local_rank == 0:
-            #     logger.info("Epoch: %d/%s, Step: %d/%d, Lr: %s, Loss: %f, Time/step: %f", epoch + 1,
-            #                 args.epochs, step + 1,
-            #                 len(train_dataloader), "-".join([str('%.6f'%itm) for itm in sorted(list(set(optimizer.get_lr())))]),
-            #                 float(loss),
-            #                 (time.time() - start_time) / (log_step * args.gradient_accumulation_steps))
-            #     start_time = time.time()
     progress_bar.close()
     
     total_loss = total_loss / len(train_dataloader)
@@ -1233,32 +590,12 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
     
     for b_id, batch in progress_bar:
         
-
-
         batch = tuple(t.to(device, non_blocking=True) for t in batch)
 
-        if args.datatype == "ourds-audio-bbx":
-            input_ids, input_mask, segment_ids, video, video_mask, \
-            pairs_masked_text, pairs_token_labels, masked_video, video_labels_index, \
-            pairs_input_caption_ids, pairs_decoder_mask, pairs_output_caption_ids,task_type,audio,audio_mask, bbx, bbx_mask = batch
-            bbx, bbx_mask, audio, audio_mask = audio.float(), audio_mask.float(), bbx.float(), bbx_mask.float()
-        elif args.datatype == "ourds-QA":
-            input_ids, input_mask, segment_ids, video, video_mask, \
-            pairs_masked_text, pairs_token_labels, masked_video, video_labels_index, \
-            pairs_input_caption_ids, pairs_decoder_mask, pairs_output_caption_ids,task_type, bbx, bbx_mask, _, _,_ = batch
-        elif args.datatype == "ourds-QA-raw":
-            input_ids, input_mask, segment_ids, video, video_mask, \
-            pairs_masked_text, pairs_token_labels, masked_video, video_labels_index, \
-            pairs_input_caption_ids, pairs_decoder_mask, pairs_output_caption_ids,task_type, bbx, bbx_mask, _, _ = batch
-        elif args.datatype == "ourds-CLIP":
-            input_ids, input_mask, segment_ids, video, video_mask, \
-            pairs_masked_text, pairs_token_labels, masked_video, video_labels_index, \
-            pairs_input_caption_ids, pairs_decoder_mask, pairs_output_caption_ids,task_type, bbx, bbx_mask, _, _ = batch
-        else:
-            input_ids, input_mask, segment_ids, video, video_mask, \
-            pairs_masked_text, pairs_token_labels, masked_video, video_labels_index, \
-            pairs_input_caption_ids, pairs_decoder_mask, pairs_output_caption_ids,task_type, bbx, bbx_mask = batch
-
+        input_ids, input_mask, segment_ids, video, video_mask, \
+        pairs_masked_text, pairs_token_labels, masked_video, video_labels_index, \
+        pairs_input_caption_ids, pairs_decoder_mask, pairs_output_caption_ids,task_type, bbx, bbx_mask, _, _ = batch
+       
 
         with torch.no_grad():
             sequence_output, visual_output = model.get_sequence_visual_output(input_ids, segment_ids, input_mask, video, video_mask,task_type = task_type)
@@ -1431,25 +768,7 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
     return Scores
 
 DATALOADER_DICT = {}
-DATALOADER_DICT["youcook"] = {"train":dataloader_youcook_train, "val":dataloader_youcook_test}
-DATALOADER_DICT["msrvtt"] = {"train":dataloader_msrvtt_audio_train, "val":dataloader_msrvtt_audio_test}
-DATALOADER_DICT["anet"] = {"train":dataloader_anet_caption_audio_train, "val":dataloader_anet_caption_audio_test}
-DATALOADER_DICT["anet_c3d"] = {"train":dataloader_anetc3d_caption_audio_train, "val":dataloader_anetc3d_caption_audio_test}
-DATALOADER_DICT["anet_c3d_flow"] = {"train":dataloader_anetc3d_caption_flow_train, "val":dataloader_anetc3d_caption_flow_test}
-DATALOADER_DICT["ourds"] = {"train":dataloader_ourds_train, "val":dataloader_ourds_test}
-DATALOADER_DICT["ourds-lang"] = {"train":dataloader_ourds_lang_train, "val":dataloader_ourds_lang_test}
-DATALOADER_DICT["ourds-QA"] = {"train":dataloader_ourds_QA_train, "val":dataloader_ourds_QA_test}
-DATALOADER_DICT["ourds-QA-raw"] = {"train":dataloader_ourds_QA_raw_train, "val":dataloader_ourds_QA_raw_test}
-DATALOADER_DICT["ourds-audio-bbx"] = {"train":dataloader_ourds_audio_bbx_train, "val":dataloader_ourds_audio_bbx_test}
-
-DATALOADER_DICT["ourds-CLIP"] = {"train":dataloader_ourds_CLIP_train, "val":dataloader_ourds_CLIP_test}
-
-# DATALOADER_DICT["youcook"] = {"train":dataloader_youcook_train, "val":dataloader_youcook_test}
-# DATALOADER_DICT["msrvtt"] = {"train":dataloader_msrvtt_audio_train, "val":dataloader_msrvtt_audio_test}
-# DATALOADER_DICT["anet"] = {"train":dataloader_anet_caption_audio_train, "val":dataloader_anet_caption_audio_test}
-# DATALOADER_DICT["anet_c3d"] = {"train":dataloader_anetc3d_caption_audio_train, "val":dataloader_anetc3d_caption_audio_test}
-DATALOADER_DICT["anet_c3d_flow"] = {"train":dataloader_anetc3d_caption_flow_pickle_train, "val":dataloader_anetc3d_caption_flow_pickle_test}
-
+DATALOADER_DICT["ourds-DAM"] = {"train":dataloader_ourds_CLIP_train, "val":dataloader_ourds_CLIP_test}
 
 action_list = json.load(open('{}/data/action_list.json'.format(os.environ["DIR_PATH"]), 'r'))
 action_token2full_description = {'action%s'%a_idx:a_l.lower().replace('_',' ').replace('-',' ') for a_idx, a_l in enumerate(action_list)}
@@ -1487,17 +806,10 @@ def init_training_caption(args):
     
     for action_token, action_description in action_token2full_description.items():
         ids = tokenizer_original.convert_tokens_to_ids(tokenizer_original.tokenize(action_description))
-        random_action_embed = model.bert.embeddings.word_embeddings.weight[tokenizer.convert_tokens_to_ids([action_token])]
         new_action_embed = torch.mean(model.bert.embeddings.cpu()(torch.tensor([ids])),dim=1)
-        #new_action_embed = new_action_embed.to(random_action_embed.device)
-        cos = nn.CosineSimilarity(dim=1, eps=1e-6)
-        output = cos(random_action_embed.cpu(), new_action_embed)
         with torch.no_grad():
             model.bert.embeddings.word_embeddings.weight[tokenizer.convert_tokens_to_ids([action_token])] = new_action_embed
             model.decoder.embeddings.word_embeddings.weight[tokenizer.convert_tokens_to_ids([action_token])] = new_action_embed
-        random_action_embed = model.bert.embeddings.word_embeddings.weight[tokenizer.convert_tokens_to_ids([action_token])]
-        output = cos(random_action_embed, new_action_embed)
-        output = cos(model.decoder.embeddings.word_embeddings.weight[tokenizer.convert_tokens_to_ids([action_token])], new_action_embed)
 
     model.to(device)
     model.bert.to(device)
@@ -1515,17 +827,6 @@ def init_training_caption(args):
         # remove freeze_encoder flag
         args.freeze_encoder = None
         
-
-    # for name, param in model.named_parameters():
-    #     if param.requires_grad:
-    #         if 'bbx' in name:
-    #             print(name)
-    #         # print(name)
-    #     else:
-    #         # if 'bbx' in name:
-    #         #     print('no grad ' +name)
-    #         # print('no-grad ' +name)
-    #         continue
     assert "caption" in args.task_type
     nlgEvalObj = NLGEval(no_overlap=False, no_skipthoughts=True, no_glove=True, metrics_to_omit=None)
 
@@ -1655,8 +956,6 @@ class Args_Caption:
         self.train_csv = "{}/ourds_train.44k.csv".format(self.data_dir)
         self.val_csv = "{}/ourds_JSFUSION_test.csv".format(self.data_dir)
         self.data_path = "{}/new_ourds_description_only.json".format(self.data_dir)
-        # self.features_path = "{}/ourds_features_w_size_32.pkl".format(self.features_dir)
-        # self.features_path = "{}/ourds_features_w_size_8.pkl".format(self.features_dir)
         self.bbx_features_path = "{}/cls2_ball_basket_sum_concat_original_courtline_fea_1.pickle".format(self.data_dir)
         self.features_path = "{}/ourds_videos_timesformer_features.pickle".format(self.features_dir)
         self.audio_features_path = "{}/ourds_audio_VGGish_features.pkl".format(self.data_dir)
@@ -1692,7 +991,7 @@ class Args_Caption:
         self.fp16 = False
         self.fp16_opt_level = 'O1'
         self.task_type = task 
-        self.datatype = "ourds-CLIP" 
+        self.datatype = "" 
         self.world_size = 0
         self.local_rank = 0
         self.coef_lr = 0.1
@@ -1704,25 +1003,11 @@ class Args_Caption:
         self.visual_num_hidden_layers = 6
         self.cross_num_hidden_layers = 3
         self.decoder_num_hidden_layers = 3
-        self.loss = "MSE"
-        self.bottleneck_dim = 0,
-        self.bottleneck_fusion_layers = 0,
-        self.bottleneck_use_conv = False
-        self.export_attn_scores = export_attention_scores
         self.visual_use_diagonal_masking = False
         self.train_tasks = [0,0,1,0]
-        self.cross_masking = None # "upper", "lower", "upper-no-inp", "lower-no-inp", None, "random", "random-global"
         self.test_tasks = [0,0,1,0]
         self.t1_postprocessing = True
-        self.stage_two = True
-        self.unsup_pretrain = False
-        self.bert_weights_only = False
-        self.use_answer = None
-        self.join_vision_audio = True
-        self.fine_tune_extractor = False
-        self.extractor = "videomae"
         self.player_embedding = "CLIP" # BERT, CLIP, none, BERT-Stat
-        self.use_random_embeddings = False
         self.player_embedding_order = "lineup" # lineup, lineup-ordered, posession, none, BC
         self.use_BBX_features = True
         self.max_rand_players = 5

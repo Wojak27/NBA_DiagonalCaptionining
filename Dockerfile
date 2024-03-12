@@ -45,7 +45,4 @@ WORKDIR /app
 COPY . /app
 
 # make it execute as a python script
-ENTRYPOINT ["python3", "main_task_caption.py"]
-# CMD ["nohup", "python3", "run_sweep.py", "&"]
-# CMD ["nohup", "python3", "run_sweep.py", "&"]
-# CMD ["nohup", "python3", "run_sweep.py", "&"]
+ENTRYPOINT ["python3", "main_task_caption_DAM.py"]
