@@ -240,22 +240,9 @@ class UniVL(UniVLPreTrainedModel):
         assert self.task_config.max_frames <= visual_config.max_position_embeddings
         assert self.task_config.max_words + self.task_config.max_frames <= cross_config.max_position_embeddings
         
-        self._stage_one = True
-        self._stage_two = False
 
         self.multibbxs = task_config.multibbxs
         self.context_only = self.task_config.context_only
-        if check_attr('stage_two', self.task_config):
-            self._stage_one = False
-            self._stage_two = self.task_config.stage_two
-        show_log(task_config, "Stage-One:{}, Stage-Two:{}".format(self._stage_one, self._stage_two))
-
-        self.train_sim_after_cross = False
-        
-
-        if self._stage_one and check_attr('train_sim_after_cross', self.task_config):
-            self.train_sim_after_cross = True
-            show_log(task_config, "Test retrieval after cross encoder.")
 
         ########### Initialize Models ###########
         # Text Encoder ===>
@@ -293,25 +280,23 @@ class UniVL(UniVLPreTrainedModel):
         self.bbxs_dropout = nn.Dropout(0.5)
         ############## End of Video Encoder ##############
 
-        if self._stage_one is False or self.train_sim_after_cross:
-            # Cross Encoder ===>
-            cross_config = update_attr("cross_config", cross_config, "num_hidden_layers",
-                                        self.task_config, "cross_num_hidden_layers")
-            self.cross = None
-            if(cross_config.num_hidden_layers != 0):
-                self.cross = CrossModel(cross_config, args=self.task_config)
-            # <=== End of Cross Encoder
+        # Cross Encoder ===>
+        cross_config = update_attr("cross_config", cross_config, "num_hidden_layers",
+                                    self.task_config, "cross_num_hidden_layers")
+        self.cross = None
+        if(cross_config.num_hidden_layers != 0):
+            self.cross = CrossModel(cross_config, args=self.task_config)
+        # <=== End of Cross Encoder
 
-            if self.train_sim_after_cross is False:
-                # Decoder ===>
-                decoder_config = update_attr("decoder_config", decoder_config, "num_decoder_layers",
-                                           self.task_config, "decoder_num_hidden_layers")
+        # Decoder ===>
+        decoder_config = update_attr("decoder_config", decoder_config, "num_decoder_layers",
+                                    self.task_config, "decoder_num_hidden_layers")
 
-                self.decoder = DecoderModel(decoder_config, bert_word_embeddings_weight, bert_position_embeddings_weight)
-                # <=== End of Decoder
-                
-            self.similarity_dense = nn.Linear(bert_config.hidden_size, 1)
-            self.decoder_loss_fct = CrossEntropyLoss(ignore_index=-1)
+        self.decoder = DecoderModel(decoder_config, bert_word_embeddings_weight, bert_position_embeddings_weight)
+        # <=== End of Decoder
+            
+        self.similarity_dense = nn.Linear(bert_config.hidden_size, 1)
+        self.decoder_loss_fct = CrossEntropyLoss(ignore_index=-1)
 
         self.normalize_video = NormalizeVideo(task_config)
         self.normalize_bbx = NormalizeBBX(task_config)
@@ -325,10 +310,10 @@ class UniVL(UniVLPreTrainedModel):
                 
             
         if task_config.use_mil:
-            self.loss_fct = CrossEn() if self._stage_two else mILNCELoss
+            self.loss_fct = CrossEn() 
             self._pretrain_sim_loss_fct = mILNCELoss
         else:
-            self.loss_fct = CrossEn() if self._stage_two else maxMarginRankingLoss
+            self.loss_fct = CrossEn() 
             self._pretrain_sim_loss_fct = maxMarginRankingLoss
 
         self.apply(self.init_weights)
@@ -534,21 +519,6 @@ class UniVL(UniVLPreTrainedModel):
         retrieve_logits = torch.cat(retrieve_logits_list, dim=0)
         return retrieve_logits
 
-    def get_similarity_logits(self, sequence_output, visual_output, attention_mask, video_mask, shaped=False, _pretrain_joint=False):
-        if shaped is False:
-            attention_mask = attention_mask.view(-1, attention_mask.shape[-1])
-            video_mask = video_mask.view(-1, video_mask.shape[-1])
-
-        if (self._stage_two and _pretrain_joint is False) or self.train_sim_after_cross:
-            retrieve_logits = self._cross_similarity(sequence_output, visual_output, attention_mask, video_mask)
-        else:
-            text_out, video_out = self._mean_pooling_for_similarity(sequence_output, visual_output, attention_mask, video_mask)
-            if self.task_config.use_mil is False:
-                text_out = F.normalize(text_out, dim=-1)
-                video_out = F.normalize(video_out, dim=-1)
-            retrieve_logits = torch.matmul(text_out, video_out.t())
-
-        return retrieve_logits
    
 
 

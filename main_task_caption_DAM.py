@@ -31,7 +31,7 @@ from torchsummary import summary
 import pickle5 as pickle
 import re
 # import tensorboard summary writer
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 
 global logger
 
@@ -44,15 +44,15 @@ def get_args(description='UniVL on Caption Task'):
     parser.add_argument("--do_train", action='store_true', help="Whether to run training.")
     parser.add_argument("--do_eval", action='store_true', help="Whether to run eval on the dev set.")
 
-    parser.add_argument('--train_csv', type=str, default='./ourds_train.44k.csv', help='')
-    parser.add_argument('--val_csv', type=str, default='./ourds_JSFUSION_test.csv', help='')
-    parser.add_argument('--data_path', type=str, default='./ourds_data_timesformer/ourds_description.json',
+    parser.add_argument('--train_csv', type=str, default='./data/ourds_train.44k.csv', help='')
+    parser.add_argument('--val_csv', type=str, default='./data/ourds_JSFUSION_test.csv', help='')
+    parser.add_argument('--data_path', type=str, default='./data/ourds_data_timesformer/ourds_description.json',
                         help='caption and transcription pickle file path')
-    parser.add_argument('--features_path', type=str, default='./ourds_videos_features.pickle',
+    parser.add_argument('--features_path', type=str, default='./data/ourds_videos_features.pickle',
                         help='feature path for 2D features')
 
 
-    parser.add_argument('--bbx_features_path', type=str, default='./ourds_bbx_data/ourds_videos_features.pickle',
+    parser.add_argument('--bbx_features_path', type=str, default='./data/ourds_videos_features.pickle',
                         help='feature path for 2D features')
 
     parser.add_argument('--num_thread_reader', type=int, default=1, help='')
@@ -75,7 +75,7 @@ def get_args(description='UniVL on Caption Task'):
     parser.add_argument('--n_pair', type=int, default=1, help='Num of pair to output from data loader')
 
 
-    parser.add_argument("--output_dir", default='/media/chris/hdd1/UniVL_processing_code/ourds_data_timesformer_bbx/ckpt_ourds_caption', type=str, required=False,
+    parser.add_argument("--output_dir", default='/output', type=str, required=False,
                         help="The output directory where the model predictions and checkpoints will be written.")
     parser.add_argument("--bert_model", default="bert-base-uncased", type=str, required=False, help="Bert pre-trained model")
     parser.add_argument("--visual_model", default="visual-base", type=str, required=False, help="Visual module")
@@ -120,7 +120,6 @@ def get_args(description='UniVL on Caption Task'):
     parser.add_argument('--test_tasks',default=[0,0,1,0], type=lambda s: [int(item) for item in s.split(',')], help="test with specific tasks: 1 for yes, 0 for no")
     parser.add_argument('--t1_postprocessing', action='store_true', help="Whether postprocess output with action type")
 
-    parser.add_argument('--stage_two', action='store_true', help="Whether training with decoder.")
     parser.add_argument("--visual_use_diagonal_masking", action='store_true', help="Use diagonal masking for visual features")
     parser.add_argument("--player_embedding", default="CLIP", choices=["BERT", "CLIP", "none", "BERT-Stat"], help="Type of player embedding to use")
     parser.add_argument("--player_embedding_order", default="lineup", choices=["lineup", "lineup-ordered", "posession", "none", "BC"], help="Order of player embedding")
@@ -134,8 +133,8 @@ def get_args(description='UniVL on Caption Task'):
     if args.gradient_accumulation_steps < 1:
         raise ValueError("Invalid gradient_accumulation_steps parameter: {}, should be >= 1".format(
             args.gradient_accumulation_steps))
-    if not args.do_train and not args.do_eval:
-        raise ValueError("At least one of `do_train` or `do_eval` must be True.")
+    # if not args.do_train and not args.do_eval:
+    #     raise ValueError("At least one of `do_train` or `do_eval` must be True.")
 
     args.batch_size = int(args.batch_size / args.gradient_accumulation_steps)
 
@@ -170,7 +169,8 @@ def set_seed_logger(args):
 def init_device(args, local_rank):
     global logger
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu", local_rank)
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu", local_rank)
+    device = torch.device("cpu", local_rank)
 
     n_gpu = torch.cuda.device_count()
     logger.info("device: {} n_gpu: {}".format(device, n_gpu))
@@ -548,8 +548,6 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
     if hasattr(model, 'module'):
         model = model.module.to(device)
 
-    if model._stage_one:
-        return 0.
 
     test_tasks = [id for id, task in enumerate(args.test_tasks) if task ==1] 
     result_list_byTask = {t:[] for t in test_tasks}
@@ -801,9 +799,9 @@ def init_training_caption(args):
                 continue
             conf[key] = value
 
-        writer = SummaryWriter(
-            "{}_{}_{}_{}_{}".format(args.task_type, args.datatype, args.bert_model, args.lr, args.batch_size)
-        )
+        # writer = SummaryWriter(
+        #     "{}_{}_{}_{}_{}".format(args.task_type, args.datatype, args.bert_model, args.lr, args.batch_size)
+        # )
         writer = None
 
         if debug_eval is True:
@@ -864,5 +862,8 @@ def init_training_caption(args):
 
 if __name__ == "__main__":
     args = get_args()
+    args.do_train = True
+    args.do_eval = not args.do_train
+    args.output_dir = "output"
     init_training_caption(args)
 
