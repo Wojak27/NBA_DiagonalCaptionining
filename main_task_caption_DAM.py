@@ -2,14 +2,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import unicode_literals
 from __future__ import print_function
-from dataloaders.dataloader_msrvtt_caption import MSRVTT_Caption_DataLoader
 from dataloaders.dataloader_ourds_CLIP import OURDS_CLIP_DataLoader
 
-from dataloaders.dataloader_ourds_caption import OURDS_Caption_DataLoader
-from dataloaders.dataloader_youcook_caption import Youcook_Caption_DataLoader
-from dataloaders.dataloader_anet_caption_flow_pickle import ActivityNet_Caption_DataLoader_Flow_Pickle
 from tqdm import tqdm
-import wandb
 from datetime import datetime
 from distutils.log import debug
 from posixpath import split
@@ -24,35 +19,23 @@ from nlgeval import NLGEval
 import time
 import argparse
 import json
-from dataloaders.dataloader_anet_caption_audio import ActivityNet_Caption_DataLoader_Audio
-from dataloaders.dataloader_anet_caption_flow import ActivityNet_Caption_DataLoader_Flow
-from dataloaders.dataloader_msrvtt_caption_audio import MSRVTT_Caption_DataLoader_Audio
-from dataloaders.dataloader_ourds_caption_audio_bbx import OURDS_Caption_Audio_BBX_DataLoader
-from dataloaders.dataloader_ourds_caption_lang import OURDS_Caption_Lang_DataLoader
-# from dataloaders.dataloader_msrvtt_caption_audio import MSRVTT_Caption_DataLoader_Audio
-from dataloaders.dataloader_ourds_q_and_a import OURDS_QA_DataLoader
-from dataloaders.dataloader_ourds_q_and_a_raw import OURDS_QA_RAW_DataLoader
 from modules.tokenization import BertTokenizer
 from modules.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from modules.modeling import UniVL
 from modules.optimization import BertAdam
 from modules.beam import Beam
 from torch.utils.data import DataLoader
-# from dataloaders.dataloader_youcook_caption import Youcook_Caption_DataLoader
-# from dataloaders.dataloader_msrvtt_caption import MSRVTT_Caption_DataLoader
-# from dataloaders.dataloader_ourds_caption import OURDS_Caption_DataLoader
 from util import get_logger
 from torch import nn
 from torchsummary import summary
 import pickle5 as pickle
 import re
-# torch.distributed.init_process_group(backend="nccl")
+# import tensorboard summary writer
+from torch.utils.tensorboard import SummaryWriter
 
 global logger
 
-wandb.login()
 
-# from torch.utils.tensorboard import SummaryWriter
 
 def get_args(description='UniVL on Caption Task'):
     parser = argparse.ArgumentParser(description=description)
@@ -118,7 +101,7 @@ def get_args(description='UniVL on Caption Task'):
                              "See details at https://nvidia.github.io/apex/amp.html")
 
     parser.add_argument("--task_type", default="caption", type=str, help="Point the task `caption` to finetune.")
-    parser.add_argument("--datatype", default="ourds", type=str, help="Point the dataset `youcook` to finetune.")
+    parser.add_argument("--datatype", default="ourds-DAM", type=str, help="Point the dataset `youcook` to finetune.")
 
     parser.add_argument("--world_size", default=0, type=int, help="distribted training")
     parser.add_argument("--local_rank", default=0, type=int, help="distribted training")
@@ -131,6 +114,7 @@ def get_args(description='UniVL on Caption Task'):
     parser.add_argument('--visual_num_hidden_layers', type=int, default=3, help="Layer NO. of visual.")
     parser.add_argument('--cross_num_hidden_layers', type=int, default=3, help="Layer NO. of cross.")
     parser.add_argument('--decoder_num_hidden_layers', type=int, default=6, help="Layer NO. of decoder.")
+    parser.add_argument("--multibbxs", action='store_true', help="Whether to use multiple bounding boxes")
 
     parser.add_argument('--train_tasks', default=[0,0,1,0],type=lambda s: [int(item) for item in s.split(',')], help="train with specific tasks: 1 for yes, 0 for no")
     parser.add_argument('--test_tasks',default=[0,0,1,0], type=lambda s: [int(item) for item in s.split(',')], help="test with specific tasks: 1 for yes, 0 for no")
@@ -169,9 +153,7 @@ def set_seed_logger(args):
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
-    # world_size = torch.distributed.get_world_size()
     torch.cuda.set_device(args.local_rank)
-    # args.world_size = world_size
 
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir, exist_ok=True)
@@ -211,7 +193,6 @@ def init_model(args, device, n_gpu, local_rank):
     cache_dir = args.cache_dir if args.cache_dir else os.path.join(str(PYTORCH_PRETRAINED_BERT_CACHE), 'distributed')
     model = UniVL.from_pretrained(args.bert_model, args.visual_model, args.cross_model, args.decoder_model,
                                    cache_dir=cache_dir, state_dict=model_state_dict, task_config=args)
-    # model = model.float()
     model.to(device)
 
     return model
@@ -245,8 +226,6 @@ def prep_optimizer(args, model, num_train_optimization_steps, device, n_gpu, loc
                          schedule='warmup_linear', t_total=num_train_optimization_steps, weight_decay=0.01,
                          max_grad_norm=1.0)
 
-    # model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],
-    #                                                   output_device=local_rank, find_unused_parameters=True)
 
     return optimizer, scheduler, model
 
@@ -262,9 +241,8 @@ def dataloader_ourds_CLIP_train(args, tokenizer):
         max_frames=args.max_frames,
         split_type="train",
         split_task = args.train_tasks,
-        use_answer=args.use_answer,
         is_pretraining=args.do_pretrain,
-        use_random_embeddings=args.use_random_embeddings,
+        use_random_embeddings=args.player_embedding == "Rand",
         num_samples=100000,
         mask_prob=0.25,
         only_players=True,
@@ -275,7 +253,6 @@ def dataloader_ourds_CLIP_train(args, tokenizer):
         max_rand_players=args.max_rand_players
     )
 
-    # train_sampler = torch.utils.data.Sampler(ourds_dataset)
     dataloader = DataLoader(
         ourds_dataset,
         batch_size=args.batch_size // args.n_gpu,
@@ -297,10 +274,9 @@ def dataloader_ourds_CLIP_test(args, tokenizer, split_type="test"):
         feature_framerate=args.feature_framerate,
         tokenizer=tokenizer,
         max_frames=args.max_frames,
-        use_random_embeddings=args.use_random_embeddings,
+        use_random_embeddings=args.player_embedding == "Rand",
         split_type=split_type,
         split_task = args.test_tasks,
-        use_answer=args.use_answer,
         is_pretraining=args.do_pretrain,
         num_samples=0,
         only_players=True,
@@ -414,8 +390,6 @@ def train_epoch(epoch, args, model, train_dataloader, tokenizer, device, n_gpu, 
         progress_bar.set_description(f"Epoch {epoch+1}, Step {step+1}, Loss: {float(loss):.4f}")
         if writer is not None:
             writer.add_scalar("Loss/train", loss, epoch)
-        if wandb is not None:
-            wandb.log({"Loss/train": loss})
 
         if n_gpu > 1:
             loss = loss.mean()  # mean() to average on multi-gpu.
@@ -526,18 +500,11 @@ def beam_decode_step(decoder, inst_dec_beams, len_dec_seq,
 
     def predict_word(next_decoder_ids, n_active_inst, n_bm, device, input_tuples,task_type = task_type):
         
-        if args.fine_tune_extractor == False:
-            sequence_output_rpt, visual_output_rpt, input_ids_rpt, input_mask_rpt, video_mask_rpt, bbz_output_rpt, bbx_mask = input_tuples
-        else:
-            sequence_output_rpt, visual_output_rpt, input_ids_rpt, input_mask_rpt, video_mask_rpt = input_tuples
+        sequence_output_rpt, visual_output_rpt, input_ids_rpt, input_mask_rpt, video_mask_rpt, bbz_output_rpt, bbx_mask = input_tuples
         next_decoder_mask = torch.ones(next_decoder_ids.size(), dtype=torch.uint8).to(device)
 
-        if args.fine_tune_extractor == False:
-            dec_output = decoder(sequence_output_rpt, visual_output_rpt, input_ids_rpt, input_mask_rpt,
-                                video_mask_rpt, next_decoder_ids, next_decoder_mask, bbz_output_rpt, bbx_mask, shaped=True, get_logits=True,task_type = task_type)
-        else:
-            dec_output = decoder(sequence_output_rpt, visual_output_rpt, input_ids_rpt, input_mask_rpt,
-                                video_mask_rpt, next_decoder_ids, next_decoder_mask, shaped=True, get_logits=True,task_type = task_type)
+        dec_output = decoder(sequence_output_rpt, visual_output_rpt, input_ids_rpt, input_mask_rpt,
+                            video_mask_rpt, next_decoder_ids, next_decoder_mask, bbz_output_rpt, bbx_mask, shaped=True, get_logits=True,task_type = task_type)
         dec_output = dec_output[:, -1, :]
         word_prob = torch.nn.functional.log_softmax(dec_output, dim=1)
         word_prob = word_prob.view(n_active_inst, n_bm, -1)
@@ -605,36 +572,25 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
 
         with torch.no_grad():
             sequence_output, visual_output = model.get_sequence_visual_output(input_ids, segment_ids, input_mask, video, video_mask,task_type = task_type)
-            if args.fine_tune_extractor == False:
-                if model.multibbxs:
-                    batch_sz,_,bbx_num,max_frame_num,fea_sz = bbx.shape
-                    bbx = bbx.permute((0, 1, 3, 2, 4)).reshape(batch_sz,_,max_frame_num,fea_sz*bbx_num)
-                    #bbx = model.bbx_fea_fusion_two(bbx)
-                if "audio" in args.task_type:
-                    bbx = model.audio_embed(bbx)
-                    bbx = bbx.squeeze(1)
-                    bbx_output = model.get_bbx_output(bbx.squeeze(1), bbx_mask.squeeze(1), shaped=True)
-                else:
-                    bbx_output = model.get_bbx_output(bbx.squeeze(1), bbx_mask.squeeze(1))
+            if model.multibbxs:
+                batch_sz,_,bbx_num,max_frame_num,fea_sz = bbx.shape
+                bbx = bbx.permute((0, 1, 3, 2, 4)).reshape(batch_sz,_,max_frame_num,fea_sz*bbx_num)
+            bbx_output = model.get_bbx_output(bbx.squeeze(1), bbx_mask.squeeze(1))
 
             # -- Repeat data for beam search
             n_bm = 5 # beam_size
             device = sequence_output.device
             n_inst, len_s, d_h = sequence_output.size()
             _, len_v, v_h = visual_output.size()
-            # visual_output = visual_output.unsqueeze(1)
 
-            if args.fine_tune_extractor == False:
-                decoder = model.decoder_caption
-            else:
-                decoder = model.decoder_captionVL
+
+            decoder = model.decoder_caption
 
             # Note: shaped first, then decoder need the parameter shaped=True
             input_ids = input_ids.view(-1, input_ids.shape[-1])
             input_mask = input_mask.view(-1, input_mask.shape[-1])
             video_mask = video_mask.view(-1, video_mask.shape[-1])
-            if args.fine_tune_extractor == False:
-                bbx_mask = bbx_mask.view(-1, bbx_mask.shape[-1])
+            bbx_mask = bbx_mask.view(-1, bbx_mask.shape[-1])
 
             # The following line need to be changed soon
             if args.use_prefix_tuning !=False:
@@ -642,14 +598,12 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
 
             sequence_output_rpt = sequence_output.repeat(1, n_bm, 1).view(n_inst * n_bm, len_s, d_h)
             visual_output_rpt = visual_output.repeat(1, n_bm, 1).view(n_inst * n_bm, len_v, v_h)
-            if args.fine_tune_extractor == False:
-                bbx_output_rpt = bbx_output.repeat(1, n_bm, 1).view(n_inst * n_bm, len_v, v_h)
+            bbx_output_rpt = bbx_output.repeat(1, n_bm, 1).view(n_inst * n_bm, len_v, v_h)
 
             input_ids_rpt = input_ids.repeat(1, n_bm).view(n_inst * n_bm, len_s)
             input_mask_rpt = input_mask.repeat(1, n_bm).view(n_inst * n_bm, len_s)
             video_mask_rpt = video_mask.repeat(1, n_bm).view(n_inst * n_bm, len_v)
-            if args.fine_tune_extractor == False:
-                bbx_mask_rpt = bbx_mask.repeat(1, n_bm).view(n_inst * n_bm, len_v)
+            bbx_mask_rpt = bbx_mask.repeat(1, n_bm).view(n_inst * n_bm, len_v)
 
             task_type_rpt = task_type.repeat(n_bm)
 
@@ -660,28 +614,18 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
             inst_idx_to_position_map = get_inst_idx_to_tensor_position_map(active_inst_idx_list)
             # -- Decode
             for len_dec_seq in range(1, args.max_words + 1):
-                if args.fine_tune_extractor == False:
-                    active_inst_idx_list = beam_decode_step(decoder, inst_dec_beams,
-                                                            len_dec_seq, inst_idx_to_position_map, n_bm, device,
-                                                            (sequence_output_rpt, visual_output_rpt, input_ids_rpt, input_mask_rpt, video_mask_rpt, bbx_output_rpt, bbx_mask_rpt), task_type = task_type_rpt)
-                else:
-                    active_inst_idx_list = beam_decode_step(decoder, inst_dec_beams,
-                                                            len_dec_seq, inst_idx_to_position_map, n_bm, device,
-                                                            (sequence_output_rpt, visual_output_rpt, input_ids_rpt, input_mask_rpt, video_mask_rpt), task_type = task_type_rpt)
+                active_inst_idx_list = beam_decode_step(decoder, inst_dec_beams,
+                                                        len_dec_seq, inst_idx_to_position_map, n_bm, device,
+                                                        (sequence_output_rpt, visual_output_rpt, input_ids_rpt, input_mask_rpt, video_mask_rpt, bbx_output_rpt, bbx_mask_rpt), task_type = task_type_rpt)
 
                 if not active_inst_idx_list:
                     break  # all instances have finished their path to <EOS>
                 
-                if args.fine_tune_extractor == False:
-                    (sequence_output_rpt, visual_output_rpt, input_ids_rpt, input_mask_rpt, video_mask_rpt,task_type_rpt, bbx_output_rpt, bbx_mask_rpt), \
-                    inst_idx_to_position_map = collate_active_info((sequence_output_rpt, visual_output_rpt, input_ids_rpt, input_mask_rpt, video_mask_rpt,task_type_rpt,bbx_output_rpt, bbx_mask_rpt),
-                                                                inst_idx_to_position_map, active_inst_idx_list, n_bm, device
-                                                                )
-                else:
-                    (sequence_output_rpt, visual_output_rpt, input_ids_rpt, input_mask_rpt, video_mask_rpt,task_type_rpt), \
-                    inst_idx_to_position_map = collate_active_infoVL((sequence_output_rpt, visual_output_rpt, input_ids_rpt, input_mask_rpt, video_mask_rpt,task_type_rpt),
-                                                                inst_idx_to_position_map, active_inst_idx_list, n_bm, device
-                                                                )
+                (sequence_output_rpt, visual_output_rpt, input_ids_rpt, input_mask_rpt, video_mask_rpt,task_type_rpt, bbx_output_rpt, bbx_mask_rpt), \
+                inst_idx_to_position_map = collate_active_info((sequence_output_rpt, visual_output_rpt, input_ids_rpt, input_mask_rpt, video_mask_rpt,task_type_rpt,bbx_output_rpt, bbx_mask_rpt),
+                                                            inst_idx_to_position_map, active_inst_idx_list, n_bm, device
+                                                            )
+                
 
             batch_hyp, batch_scores = collect_hypothesis_and_scores(inst_dec_beams, 1)
             result_list = [batch_hyp[i][0] for i in range(n_inst)]
@@ -747,15 +691,6 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
             writer.write(ground_txt + "\n")
 
     all_caption_lists = None
-    if args.datatype == "msrvtt":
-        all_caption_lists = []
-        sentences_dict = test_dataloader.dataset.sentences_dict
-        video_sentences_dict = test_dataloader.dataset.video_sentences_dict
-        for idx in range(len(sentences_dict)):
-            video_id, _ = sentences_dict[idx]
-            sentences = video_sentences_dict[video_id]
-            all_caption_lists.append(sentences)
-        all_caption_lists = [list(itms) for itms in zip(*all_caption_lists)]
 
     # Evaluate
     for task in test_tasks:
@@ -822,17 +757,6 @@ def init_training_caption(args):
     model.bert.embeddings.to(device)
     model.bert.embeddings.word_embeddings.to(device)
     
-    if args.freeze_encoder != None and args.freeze_encoder == True:
-        for param in model.bbx.parameters():
-            param.requires_grad = False
-        for param in model.visual.parameters():
-            param.requires_grad = False
-        for param in model.cross.parameters():
-            param.requires_grad = False
-    elif args.freeze_encoder != None:
-        # remove freeze_encoder flag
-        args.freeze_encoder = None
-        
     assert "caption" in args.task_type
     nlgEvalObj = NLGEval(no_overlap=False, no_skipthoughts=True, no_glove=True, metrics_to_omit=None)
 
@@ -876,17 +800,10 @@ def init_training_caption(args):
             if(key in ["video_feature", "video_bbx_feature", "cos", "device", "audio_feature"]):
                 continue
             conf[key] = value
-        # start a new wandb run to track this script
-        wandb.init(
-            # set the wandb project where this run will be logged
-            project="Multimodal-Fusion-Bottleneck",
-            name="{}_{}_{}_{}_{}_enc_{}_cross_{}_declay_{}_conv_{}".format(args.task_type, args.datatype, args.bert_model, args.lr, args.batch_size,  args.visual_num_hidden_layers, args.cross_num_hidden_layers, args.decoder_num_hidden_layers ,args.bottleneck_use_conv),
-            # track hyperparameters and run metadata
-            config=conf,
-        ) 
-        # writer = SummaryWriter(
-        #     "runs/{}_{}_{}_{}_{}_{}_bottley_{}_bottdim_{}_enc_{}_cross_{}_declay_{}_conv_{}".format(datetime.now(),args.task_type, args.datatype, args.bert_model, args.lr, args.batch_size, args.bottleneck_fusion_layers, args.bottleneck_dim, args.visual_num_hidden_layers, args.cross_num_hidden_layers,args.decoder_num_hidden_layers, args.bottleneck_use_conv)
-        # )
+
+        writer = SummaryWriter(
+            "{}_{}_{}_{}_{}".format(args.task_type, args.datatype, args.bert_model, args.lr, args.batch_size)
+        )
         writer = None
 
         if debug_eval is True:
@@ -913,10 +830,7 @@ def init_training_caption(args):
                         writer.add_scalar("Bleu_4/test", Scores["Bleu_4"], epoch)
                         for key, value in Scores.items():
                             writer.add_scalar("%s/test"%key, value, epoch)
-                    if wandb is not None:
-                        scores = {key : value for key, value in Scores.items()}
-                        wandb.log(scores)
-                    # Scores = Scores["Bleu_4"]
+                    
                     average_improvement = 0
                     if best_score is not None:
                         for key in Scores.keys():
@@ -932,9 +846,7 @@ def init_training_caption(args):
                             writer.add_scalar("Bleu_4/test", Scores["Bleu_4"], epoch)
                             for key, value in Scores.items():
                                 writer.add_scalar("%s/test"%key, value, epoch)
-                        if wandb is not None:
-                            scores = {key : value for key, value in Scores.items()}
-                            wandb.log(scores)
+                        
                     logger.info("The best model is: {}, the Bleu_4 is: {:.4f}".format(best_output_model_file, best_score["Bleu_4"] if best_score is not None else 0.0))
                 else:
                     logger.warning("Skip the evaluation after {}-th epoch.".format(epoch+1))
@@ -943,7 +855,6 @@ def init_training_caption(args):
             test_dataloader, test_length = DATALOADER_DICT[args.datatype]["val"](args, tokenizer,split_type='test')
             model = load_model(-1, args, n_gpu, device, model_file=best_output_model_file)
             eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalObj=nlgEvalObj)
-        wandb.finish()
     elif args.do_eval:
         if args.local_rank == 0:
 

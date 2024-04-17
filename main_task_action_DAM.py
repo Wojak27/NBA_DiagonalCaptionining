@@ -211,7 +211,6 @@ def dataloader_ourds_CLIP_train(args, tokenizer, action_converter=None):
         max_frames=args.max_frames,
         split_type="train",
         split_task = args.train_tasks,
-        use_answer=args.use_answer,
         is_pretraining=args.do_pretrain,
         use_random_embeddings=args.player_embedding == "Rand",
         num_samples=100000,
@@ -250,7 +249,6 @@ def dataloader_ourds_CLIP_test(args, tokenizer, split_type="test", action_conver
         use_random_embeddings=args.player_embedding == "Rand",
         split_type=split_type,
         split_task = args.test_tasks,
-        use_answer=args.use_answer,
         is_pretraining=args.do_pretrain,
         num_samples=0,
         only_players=True,
@@ -517,17 +515,11 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
 
         with torch.no_grad():
             sequence_output, visual_output = model.get_sequence_visual_output(input_ids, segment_ids, input_mask, video, video_mask,task_type = task_type)
-            if args.fine_tune_extractor == False:
-                if model.multibbxs:
-                    batch_sz,_,bbx_num,max_frame_num,fea_sz = bbx.shape
-                    bbx = bbx.permute((0, 1, 3, 2, 4)).reshape(batch_sz,_,max_frame_num,fea_sz*bbx_num)
-                    #bbx = model.bbx_fea_fusion_two(bbx)
-                if "audio" in args.task_type:
-                    bbx = model.audio_embed(bbx)
-                    bbx = bbx.squeeze(1)
-                    bbx_output = model.get_bbx_output(bbx.squeeze(1), bbx_mask.squeeze(1), shaped=True)
-                else:
-                    bbx_output = model.get_bbx_output(bbx.squeeze(1), bbx_mask.squeeze(1))
+            if model.multibbxs:
+                batch_sz,_,bbx_num,max_frame_num,fea_sz = bbx.shape
+                bbx = bbx.permute((0, 1, 3, 2, 4)).reshape(batch_sz,_,max_frame_num,fea_sz*bbx_num)
+                #bbx = model.bbx_fea_fusion_two(bbx)
+            bbx_output = model.get_bbx_output(bbx.squeeze(1), bbx_mask.squeeze(1))
 
 
 
@@ -548,8 +540,7 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
             input_ids = input_ids.view(-1, input_ids.shape[-1])
             input_mask = input_mask.view(-1, input_mask.shape[-1])
             video_mask = video_mask.view(-1, video_mask.shape[-1])
-            if args.fine_tune_extractor == False:
-                bbx_mask = bbx_mask.view(-1, bbx_mask.shape[-1])
+            bbx_mask = bbx_mask.view(-1, bbx_mask.shape[-1])
 
             # The following line need to be changed soon
             if args.use_prefix_tuning !=False:
@@ -570,13 +561,11 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
             # court_mask_rpt = court_mask.repeat(1, n_bm).view(n_inst * n_bm, len_v)
 
             
-            if args.fine_tune_extractor == False:
-                bbx_output_rpt = bbx_output.repeat(1, n_bm, 1).view(n_inst * n_bm, len_v, v_h)
+            bbx_output_rpt = bbx_output.repeat(1, n_bm, 1).view(n_inst * n_bm, len_v, v_h)
 
 
             task_type_rpt = task_type.repeat(n_bm)
-            if args.fine_tune_extractor == False:
-                bbx_mask_rpt = bbx_mask.repeat(1, n_bm).view(n_inst * n_bm, len_v)
+            bbx_mask_rpt = bbx_mask.repeat(1, n_bm).view(n_inst * n_bm, len_v)
 
             # -- Prepare beams
             inst_dec_beams = [Beam(n_bm, device=device, tokenizer=tokenizer) for _ in range(n_inst)]

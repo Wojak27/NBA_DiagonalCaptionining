@@ -423,12 +423,10 @@ class CrossLayer_NoSelf(nn.Module):
 
 
 class CrossEncoder(nn.Module):
-    def __init__(self, config, no_self_attn=False):
+    def __init__(self, config):
         super(CrossEncoder, self).__init__()
-        if no_self_attn:
-            layer = CrossLayer_NoSelf(config)
-        else:
-            layer = CrossLayer(config)
+        
+        layer = CrossLayer(config)
         self.layer = nn.ModuleList([copy.deepcopy(layer) for _ in range(config.num_hidden_layers)])
 
     def forward(self, hidden_states, attention_mask, output_all_encoded_layers=True):
@@ -524,58 +522,18 @@ class CrossPreTrainingHeads(nn.Module):
 
 
 class CrossModel(PreTrainedModel):
-    """
-    CrossModel: A model designed to handle various cross-attention masking strategies.
-
-    Features:
-        - upper: Masks the upper triangle of the attention matrix, allowing each token to attend only to preceding tokens.
-        - lower: Masks the lower triangle of the attention matrix, allowing each token to attend only to subsequent tokens.
-        - random: Introduces random masking in the attention matrix.
-        - dice: Divides the attention matrix into quadrants and masks the diagonal quadrants.
-        - global: Ensures that the first two tokens always have global attention.
-        - pipe: Indicates that the model should use a piped cross-attention mechanism.
-        - no-inp: A modifier that can be combined with other features to modify their behavior.
-
-    Combinations:
-        Features can be combined using a "-" separator. For example, "upper-random" combines the "upper" and "random" features.
-
-        - Single Feature: Use any single feature by itself, e.g., "upper", "lower", "random", etc.
-        - Double Combinations: Combine any two features, e.g., "upper-random", "lower-dice", "random-global", etc.
-        - Triple Combinations: Combine any three features, e.g., "upper-lower-random", "upper-random-dice", etc.
-
-        Note: Not all combinations might be meaningful or valid. Ensure that each combination makes sense in the context of the application.
-
-    Usage:
-        To use a particular feature or combination, set the `cross_masking` argument to the desired string value when initializing the model. For example:
-        model = CrossModel(config, args={"cross_masking": "upper-random"})
-
-        Ensure that the model is in evaluation mode if you don't want any masking during evaluation.
-
-    """
-    def __init__(self, config, export_attn_scores=False, model_name="attention_scores", args=None):
+ 
+    def __init__(self, config, args=None):
         super(CrossModel, self).__init__(config)
         self.args = args
-        if (args.cross_masking is not None ) and ("pipe" in args.cross_masking):
-            self.cross_attn_pipes = True
-        else:
-            self.cross_attn_pipes = False
+        
         self.embeddings = CrossEmbeddings(config)
-        self.encoder = CrossEncoder(config, no_self_attn=self.cross_attn_pipes)
+        self.encoder = CrossEncoder(config)
         self.pooler = CrossPooler(config)
-        if self.args is not None and self.args.cross_masking is not None and "learnable" in self.args.cross_masking:
-            # Random init boolean mask
-            self.learnable_mask = nn.Parameter(torch.ones((args.max_frames*2, args.max_frames*2)), requires_grad=True)
+        
         self.apply(self.init_weights)
         # Using a lambda function to pass additional arguments to the hook
         # Register the hook for all the attention layers in BERT
-        if export_attn_scores:
-            if not os.path.exists(model_name):
-                os.makedirs(model_name)
-            for idx, layer in enumerate(self.encoder.layer):
-                # Using a lambda function to pass additional arguments to the hook
-                layer.attention.self.attention_score_hook = layer.attention.self.register_forward_hook(
-                    lambda module, input, output, layer_num=idx: hook(module, input, output, layer_num, out_dir=model_name, prefix="cross_attention")
-                )
 
     def forward(self, concat_input, concat_type=None, attention_mask=None, output_all_encoded_layers=True):
         
@@ -592,64 +550,8 @@ class CrossModel(PreTrainedModel):
         # used in OpenAI GPT, we just need to prepare the broadcast dimension here.
         
         
-        if self.args.cross_masking is not None:
-            tmp = attention_mask
-            attention_mask = torch.ones((attention_mask.shape[0],attention_mask.shape[1], attention_mask.shape[1])).to(attention_mask.device)
-            if  "no-inp" not in self.args.cross_masking:
-                attention_mask *= tmp.unsqueeze(1) 
-            
-            if "pipe" in self.args.cross_masking:
-                # dice-no-self
-                if  "no-inp" not in self.args.cross_masking:
-                    attention_mask = torch.ones((attention_mask.shape[0],attention_mask.shape[1], attention_mask.shape[1])).to(attention_mask.device)
-                    attn_mod2 = attention_mask[:, attention_mask.size(1)//2:]
-                    mod2_cat = torch.cat((attn_mod2, attn_mod2), dim=1) # features
-                    # apply the mask to the modality 1, first dimension
-                    # attention_mask *= mod1_cat.unsqueeze(2)
-                    attention_mask *= mod2_cat.unsqueeze(1)
-                
-            if "upper" in self.args.cross_masking:
-                attention_mask *= torch.tril(torch.ones((attention_mask.shape[1],attention_mask.shape[1])).unsqueeze(0).to(attention_mask.device))
-            elif "lower" in self.args.cross_masking:
-                attention_mask *= torch.triu(torch.ones((attention_mask.shape[1],attention_mask.shape[1])).unsqueeze(0).to(attention_mask.device))
-            if self.training and ("dicerand1" in self.args.cross_masking):
-                thres_a = random.random()
-                if(thres_a > 0.75):
-                    attention_mask[:, :attention_mask.size(1)//2, :attention_mask.size(1)//2] = 0 
-                    attention_mask[:, attention_mask.size(1)//2:, attention_mask.size(1)//2:] = 0    
-            elif self.training and ("dicerand2" in self.args.cross_masking):
-                thres_a = random.random()
-                thres_b = random.random()
-                if(thres_a > 0.5):
-                    attention_mask[:, :attention_mask.size(1)//2, :attention_mask.size(1)//2] = 0 
-                if(thres_b > 0.5):
-                    attention_mask[:, attention_mask.size(1)//2:, attention_mask.size(1)//2:] = 0
-                
-            elif "dice" in self.args.cross_masking:
-                attention_mask[:, :attention_mask.size(1)//2, :attention_mask.size(1)//2] = 0 
-                attention_mask[:, attention_mask.size(1)//2:, attention_mask.size(1)//2:] = 0 
-                
-            if self.training and ("random" in self.args.cross_masking):
-                random_thres = random.random()
-                random_thres = random_thres if random_thres <= 0.75 else 0.75 
-                random_m = torch.rand_like(attention_mask)
-                random_m[random_m > random_thres] = 1
-                random_m[random_m <= random_thres] = 0
-                # Have some probability to mask the input only during training
-                attention_mask *= random_m
-            if "learnable" in self.args.cross_masking:
-                mask = self.learnable_mask.expand_as(attention_mask)
-                attention_mask *= mask
-                    
-            if ("global" in self.args.cross_masking):
-                # global attention
-                attention_mask[:, :2, :2] = 1
-                    
-                    
-            extended_attention_mask = attention_mask.unsqueeze(1)
-            
-        else:
-            extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+        
+        extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
 
         # Since attention_mask is 1.0 for positions we want to attend and 0.0 for
         # masked positions, this operation will create a tensor which is 0.0 for

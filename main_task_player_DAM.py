@@ -139,6 +139,7 @@ def get_args(description='UniVL on Caption Task'):
     parser.add_argument("--player_embedding_order", default="lineup", choices=["lineup", "lineup-ordered", "posession", "none", "BC"], help="Order of player embedding")
     parser.add_argument("--use_BBX_features", action='store_true', help="Use bounding box features")
     parser.add_argument("--max_rand_players", type=int, default=5, help="Maximum number of random players")
+    parser.add_argument("--multibbxs", action='store_true', help="Whether to use multiple bounding boxes")
 
     '''
     T1: Player Recognition
@@ -274,7 +275,6 @@ def dataloader_ourds_CLIP_train(args, tokenizer):
         max_frames=args.max_frames,
         split_type="train",
         split_task = args.train_tasks,
-        use_answer=args.use_answer,
         is_pretraining=args.do_pretrain,
         use_random_embeddings=args.player_embedding == "Rand",
         num_samples=100000,
@@ -312,7 +312,6 @@ def dataloader_ourds_CLIP_test(args, tokenizer, split_type="test"):
         use_random_embeddings=args.player_embedding == "Rand",
         split_type=split_type,
         split_task = args.test_tasks,
-        use_answer=args.use_answer,
         is_pretraining=args.do_pretrain,
         num_samples=0,
         only_players=True,
@@ -576,44 +575,28 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
             pairs_masked_text, pairs_token_labels, masked_video, video_labels_index, \
             pairs_input_caption_ids, pairs_decoder_mask, pairs_output_caption_ids,task_type, bbx, bbx_mask, _, _ = batch
 
-        # "Map feature tuple to cuda()"
-        # for key, value in feature_tuple.items():
-        #     feature_tuple[key] = value.to(device=device, non_blocking=True)
-        # for key, value in feature_mask_tuple.items():
-        #     feature_mask_tuple[key] = value.to(device=device, non_blocking=True)
 
         with torch.no_grad():
             sequence_output, visual_output = model.get_sequence_visual_output(input_ids, segment_ids, input_mask, video, video_mask,task_type = task_type)
-            if args.fine_tune_extractor == False:
-                if model.multibbxs:
-                    batch_sz,_,bbx_num,max_frame_num,fea_sz = bbx.shape
-                    bbx = bbx.permute((0, 1, 3, 2, 4)).reshape(batch_sz,_,max_frame_num,fea_sz*bbx_num)
-                    #bbx = model.bbx_fea_fusion_two(bbx)
-                if "audio" in args.task_type:
-                    bbx = model.audio_embed(bbx)
-                    bbx = bbx.squeeze(1)
-                    bbx_output = model.get_bbx_output(bbx.squeeze(1), bbx_mask.squeeze(1), shaped=True)
-                else:
-                    bbx_output = model.get_bbx_output(bbx.squeeze(1), bbx_mask.squeeze(1))
+            if model.multibbxs:
+                batch_sz,_,bbx_num,max_frame_num,fea_sz = bbx.shape
+                bbx = bbx.permute((0, 1, 3, 2, 4)).reshape(batch_sz,_,max_frame_num,fea_sz*bbx_num)
+            
+            bbx_output = model.get_bbx_output(bbx.squeeze(1), bbx_mask.squeeze(1))
 
             # -- Repeat data for beam search
             n_bm = 5 # beam_size
             device = sequence_output.device
             n_inst, len_s, d_h = sequence_output.size()
             _, len_v, v_h = visual_output.size()
-            # visual_output = visual_output.unsqueeze(1)
 
-            if args.fine_tune_extractor == False:
-                decoder = model.decoder_caption
-            else:
-                decoder = model.decoder_captionVL
+            decoder = model.decoder_caption
 
             # Note: shaped first, then decoder need the parameter shaped=True
             input_ids = input_ids.view(-1, input_ids.shape[-1])
             input_mask = input_mask.view(-1, input_mask.shape[-1])
             video_mask = video_mask.view(-1, video_mask.shape[-1])
-            if args.fine_tune_extractor == False:
-                bbx_mask = bbx_mask.view(-1, bbx_mask.shape[-1])
+            bbx_mask = bbx_mask.view(-1, bbx_mask.shape[-1])
 
             # The following line need to be changed soon
             if args.use_prefix_tuning !=False:
@@ -621,14 +604,12 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
 
             sequence_output_rpt = sequence_output.repeat(1, n_bm, 1).view(n_inst * n_bm, len_s, d_h)
             visual_output_rpt = visual_output.repeat(1, n_bm, 1).view(n_inst * n_bm, len_v, v_h)
-            if args.fine_tune_extractor == False:
-                bbx_output_rpt = bbx_output.repeat(1, n_bm, 1).view(n_inst * n_bm, len_v, v_h)
+            bbx_output_rpt = bbx_output.repeat(1, n_bm, 1).view(n_inst * n_bm, len_v, v_h)
 
             input_ids_rpt = input_ids.repeat(1, n_bm).view(n_inst * n_bm, len_s)
             input_mask_rpt = input_mask.repeat(1, n_bm).view(n_inst * n_bm, len_s)
             video_mask_rpt = video_mask.repeat(1, n_bm).view(n_inst * n_bm, len_v)
-            if args.fine_tune_extractor == False:
-                bbx_mask_rpt = bbx_mask.repeat(1, n_bm).view(n_inst * n_bm, len_v)
+            bbx_mask_rpt = bbx_mask.repeat(1, n_bm).view(n_inst * n_bm, len_v)
 
             task_type_rpt = task_type.repeat(n_bm)
 
@@ -884,7 +865,7 @@ def main(args):
     wandb.init(
         # set the wandb project where this run will be logged
         project="Multimodal-Fusion-Bottleneck",
-        name="{}_{}_{}_{}_{}_bottley_{}_bottdim_{}_enc_{}_cross_{}_declay_{}_conv_{}".format(args.task_type, args.datatype, args.bert_model, args.lr, args.batch_size, args.bottleneck_fusion_layers, args.bottleneck_dim, args.visual_num_hidden_layers, args.cross_num_hidden_layers, args.decoder_num_hidden_layers ,args.bottleneck_use_conv),
+        name="{}_{}_{}_{}_{}".format(args.task_type, args.datatype, args.bert_model, args.lr, args.batch_size),
         # track hyperparameters and run metadata
         config=conf,
     ) 

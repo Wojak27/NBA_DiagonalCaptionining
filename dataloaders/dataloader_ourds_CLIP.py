@@ -34,10 +34,8 @@ class OURDS_CLIP_DataLoader(Dataset):
             mask_prob=0.15,
             use_real_name = False,
             is_pretraining = False,
-            use_answer = None, # if None question is the input and answer is the output if True, use answer as input to caption generation if False, use question
             num_samples = 0, # if 0, use all samples, if > num_samples, use num_samples samples if < num_samples, use all samples
             only_players = True,
-            fine_tune_extractor = False,
             use_random_embeddings = False,
             player_embedding_order = None,
             use_BBX_features = False,
@@ -48,12 +46,10 @@ class OURDS_CLIP_DataLoader(Dataset):
     ):
         self.data_stats = json.load(open('/home/karolwojtulewicz/code/NSVA/data/data_stats.json','r'))
         self.raw_frames_path = '/4TBSSD_permanent/NSVA/downscaled_frames'
-        self.use_answer = use_answer
         self.only_players = only_players
         self.is_pretraining = is_pretraining
         self.playerIDdict = None
         self.use_BBX_features = use_BBX_features
-        self.fine_tune_extractor = fine_tune_extractor
         self.max_rand_players = max_rand_players
         self.action_convert_dict = action_convert_dict
         if use_real_name:
@@ -61,10 +57,8 @@ class OURDS_CLIP_DataLoader(Dataset):
         self.mask_prob = mask_prob
         self.csv = pd.read_csv(csv_path)
         self.data = json.load(open(json_path, 'r'))
-        self.fine_tune_extractor = fine_tune_extractor
-        if self.fine_tune_extractor == False:
-            self.feature_dict = video_feature
-            self.bbx_feature_dict = bbx_feature
+        self.feature_dict = video_feature
+        self.bbx_feature_dict = bbx_feature
         self.feature_framerate = feature_framerate
         self.max_words = max_words
         self.max_frames = max_frames
@@ -337,20 +331,8 @@ class OURDS_CLIP_DataLoader(Dataset):
         video = np.zeros((len(choice_video_ids), self.max_frames, self.feature_size))
         for i, video_id in enumerate(choice_video_ids):
 
-            if self.fine_tune_extractor == False:
-                if self.fine_tune_extractor == True:
-                    video_slice = np.load(self.raw_frames_path+'/'+video_id+'.npy')
-                else:
-                    video_slice = self.feature_dict[video_id]
-            # else:
-            #     gameid_eventid = self.videoid2gameid_eventid[video_id]
-            #     # gameid = gameid_eventid.split('-')[0]
-            #     # eventid = gameid_eventid.split('-')[1]
-            #     video_slice = extracting_features(self.video_path+'/'+self.videoid2split[video_id]+'/'+gameid_eventid+'.mp4')
-
-            # print("########{}".format(video_slice.shape))
-            # if self.feature_size == 1024:
-            #     video_slice = np.transpose(video_slice)
+            video_slice = self.feature_dict[video_id]
+            
             if self.max_frames < video_slice.shape[0]:
                 video_slice = video_slice[:self.max_frames]
 
@@ -362,7 +344,7 @@ class OURDS_CLIP_DataLoader(Dataset):
                 if len(video_slice.shape) == 1:
                     print(self.videoid2gameid_eventid[video_id])
                     continue
-                # print("!!!!!!!!!!! {}, {}".format(video[i][:slice_shape[0]].shape, video_slice.shape))
+                
                 video[i][:slice_shape[0]] = video_slice
 
         for i, v_length in enumerate(max_video_length):
@@ -396,12 +378,11 @@ class OURDS_CLIP_DataLoader(Dataset):
         video = np.zeros((len(choice_video_ids), self.max_frames, self.feature_size_bbx), dtype=np.float)
         for i, video_id in enumerate(choice_video_ids):
 
-            if self.fine_tune_extractor == False:
-                if video_id not in self.bbx_feature_dict.keys():
-                    video_slice = video
-                    return video, video_mask, None, None
-                else:
-                    video_slice = self.bbx_feature_dict[video_id]
+            if video_id not in self.bbx_feature_dict.keys():
+                video_slice = video
+                return video, video_mask, None, None
+            else:
+                video_slice = self.bbx_feature_dict[video_id]
             # else:
             #     gameid_eventid = self.videoid2gameid_eventid[video_id]
             #     # gameid = gameid_eventid.split('-')[0]
@@ -469,18 +450,17 @@ class OURDS_CLIP_DataLoader(Dataset):
         video = np.zeros((len(choice_video_ids),self.bbx_feature_dict['video11030'].shape[0], self.max_frames, self.feature_size_bbx), dtype=np.float32)
         for i, video_id in enumerate(choice_video_ids):
 
-            if self.fine_tune_extractor == False:
-                if video_id not in self.bbx_feature_dict.keys():
-                    video_slice = video
-                    return video, video_mask, None, None
+            if video_id not in self.bbx_feature_dict.keys():
+                video_slice = video
+                return video, video_mask, None, None
+            else:
+                video_slice = self.bbx_feature_dict[video_id]
+                clipEmbeddings = self._get_Player_Embedding(players)
+                clipEmbeddings = clipEmbeddings.unsqueeze(0).expand(video_slice.shape[0],-1,-1)
+                if self.use_BBX_features:
+                    video_slice = np.concatenate((clipEmbeddings.detach().numpy(),video_slice), 1)
                 else:
-                    video_slice = self.bbx_feature_dict[video_id]
-                    clipEmbeddings = self._get_Player_Embedding(players)
-                    clipEmbeddings = clipEmbeddings.unsqueeze(0).expand(video_slice.shape[0],-1,-1)
-                    if self.use_BBX_features:
-                        video_slice = np.concatenate((clipEmbeddings.detach().numpy(),video_slice), 1)
-                    else:
-                        video_slice = clipEmbeddings.detach().numpy()
+                    video_slice = clipEmbeddings.detach().numpy()
             # else:
             #     gameid_eventid = self.videoid2gameid_eventid[video_id]
             #     # gameid = gameid_eventid.split('-')[0]
@@ -684,14 +664,6 @@ class OURDS_CLIP_DataLoader(Dataset):
         if self.only_players:
             question = answer.split("_")[0]+"_ "+ question.split("_")[1]
         
-        if self.is_pretraining:
-            answer, question = question, question
-        else: 
-            if self.use_answer:
-                question, answer = answer, question
-            elif self.use_answer is not None: # if not nonoe and not True, needs to be False
-                question, answer = question, question
-            # else: Do nothing
             
         if self.multibbxs:
             bbx, bbx_mask, masked_bbx, bbx_labels_index = self._get_multi_bbxs([video_id], player_IDs)
@@ -709,14 +681,6 @@ class OURDS_CLIP_DataLoader(Dataset):
         
         
         
-        # if caption.split("_")[0] == "<T1>":
-        #     input_text_data = input_text_data + " ; Give me players in action"
-        # elif caption.split("_")[0] == "<T3>":
-        #     input_text_data = input_text_data + " ; Give me the caption"
-        
-        # pairs_input_caption_ids is the input to bert
-
-        #video, video_mask, masked_video, video_labels_index = self._get_video(choice_video_ids)
 
         return pairs_text, pairs_mask, pairs_segment, video, video_mask, \
                pairs_masked_text, pairs_token_labels, masked_video, video_labels_index, \

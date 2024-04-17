@@ -1,5 +1,7 @@
 This is the official repository diagonal attention video captioning network for paper *Towards Intelligent Sports Analysis: Multimodal Models for Video Captioning* 
 
+
+
 ## Setup
 Some of the following instructions come from NSVA paper that can be found here:
 
